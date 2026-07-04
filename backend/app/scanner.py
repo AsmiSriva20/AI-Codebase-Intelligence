@@ -1,5 +1,6 @@
 import os
-from parser import analyze_file
+from app.parser import analyze_file
+from app.indexer import build_index
 
 IGNORE = {
     ".git",
@@ -47,4 +48,7 @@ if __name__ == "__main__":
                     "path": file["path"],
                     "analysis": result
                 })
+         
+    index = build_index(repository_data)
+    print(index)
     print(f"Analyzed {len(repository_data)} Python files.")

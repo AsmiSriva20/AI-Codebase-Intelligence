@@ -2,6 +2,28 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from git import Repo
 from app.scanner import scan_repository
+from app.indexer import build_index
+from app.parser import analyze_file
+
+
+def analyze_repository(repo_path):
+
+    repository_data = []
+
+    files = scan_repository(repo_path)
+
+    for file in files:
+
+        if file["extension"] == ".py":
+
+            result = analyze_file(file["full_path"])
+
+            repository_data.append({
+                "path": file["path"],
+                "analysis": result
+            })
+
+    return build_index(repository_data)
 
 app = FastAPI()
 
@@ -32,3 +54,10 @@ def scan():
         "total_files": len(files),
         "files": files
     }
+
+@app.get("/analyze")
+def analyze():
+
+    repo_path = "repos/repository"
+
+    return analyze_repository(repo_path)
