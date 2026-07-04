@@ -19,6 +19,19 @@ def get_functions(node, functions):
 
     for child in node.children:
         get_functions(child, functions)
+         
+def get_calls(node, calls):     
+    if node.type == "call":
+        function = node.child_by_field_name("function")
+        function = node.child_by_field_name("function")
+
+        if function:
+             print(function.text.decode())
+        
+
+
+    for child in node.children:
+         get_calls(child, calls)
 
 
 def get_classes(node, classes):
@@ -37,19 +50,45 @@ def get_imports(node, imports):
     for child in node.children:
         get_imports(child, imports)
 
-if __name__ == "__main__":
-    tree = parse_file("app/main.py")
+def build_dependency_graph(node, graph, current_function=None):
+    
+
+    if node.type == "function_definition":
+        for child in node.children:
+            if child.type == "identifier":
+                current_function = child.text.decode()
+                graph[current_function] = []
+
+    if node.type == "call" and current_function:
+        function = node.child_by_field_name("function")
+
+        if function:
+            graph[current_function].append(function.text.decode())
+
+    for child in node.children:
+        build_dependency_graph(child, graph, current_function)
+
+def analyze_file(path):
+
+    tree = parse_file(path)
 
     functions = []
     classes = []
     imports = []
-
-    tree = parse_file("app/main.py")
+    graph = {}
 
     get_functions(tree.root_node, functions)
     get_classes(tree.root_node, classes)
     get_imports(tree.root_node, imports)
+    build_dependency_graph(tree.root_node, graph)
 
-    print("Functions:", functions)
-    print("Classes:", classes)
-    print("Imports:", imports)
+    return {
+        "functions": functions,
+        "classes": classes,
+        "imports": imports,
+        "graph": graph
+    }
+
+if __name__ == "__main__":
+    result = analyze_file("app/main.py")
+    print(result)
