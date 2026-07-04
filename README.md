@@ -7,10 +7,10 @@ An AI-powered platform that understands GitHub repositories using static analysi
 ## Current Progress
 
 - [x] Project Initialized
-- [ ] Backend Setup
-- [ ] Frontend Setup
-- [ ] Repository Import
-- [ ] AST Parsing
-- [ ] Dependency Graph
+- [x] Backend Setup
+- [x] Frontend Setup
+- [x] Repository Import
+- [x] AST Parsing
+- [x] Dependency Graph
 - [ ] AI Chat
 - [ ] Deployment
