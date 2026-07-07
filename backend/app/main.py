@@ -1,15 +1,24 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from git import Repo
+
 from app.scanner import scan_repository
-from app.indexer import build_index
 from app.parser import analyze_file
+from app.indexer import build_index
 from app.search import (
     find_function,
     find_class,
     find_import,
     find_calls,
 )
+from app.chunker import chunk_repository
+from app.embeddings import embed_chunks
+
+app = FastAPI()
+
+# Stores embeddings in memory
+EMBEDDED_CHUNKS = []
+
 
 def analyze_repository(repo_path):
 
@@ -28,10 +37,22 @@ def analyze_repository(repo_path):
                 "analysis": result
             })
 
-    return build_index(repository_data)
+    index = build_index(repository_data)
 
-app = FastAPI()
+    chunks = chunk_repository(repository_data)
+
+    global EMBEDDED_CHUNKS
+    EMBEDDED_CHUNKS = embed_chunks(chunks)
+
+    print("Chunks:", len(EMBEDDED_CHUNKS))
+
+    return index
+
+
+# Build the repository once when the server starts
 INDEX = analyze_repository("repos/repository")
+
+
 class RepoRequest(BaseModel):
     url: str
 
@@ -43,11 +64,13 @@ def home():
 
 @app.post("/clone")
 def clone_repo(repo: RepoRequest):
+
     Repo.clone_from(repo.url, "repos/repository")
 
     return {
         "message": "Repository cloned successfully!"
     }
+
 
 @app.get("/scan")
 def scan():
@@ -59,35 +82,46 @@ def scan():
         "files": files
     }
 
+
 @app.get("/analyze")
 def analyze():
 
-    repo_path = "repos/repository"
+    return {
+        "chunks_created": len(EMBEDDED_CHUNKS),
+        "embedding_dimension": len(EMBEDDED_CHUNKS[0]["embedding"]) if EMBEDDED_CHUNKS else 0
+    }
 
-    return analyze_repository(repo_path)
 
 @app.get("/function/{name}")
 def search_function(name: str):
+
     return {
         "path": find_function(INDEX, name)
     }
+
+
 @app.get("/class/{name}")
 def search_class(name: str):
+
     return {
         "class": name,
         "path": find_class(INDEX, name)
     }
 
+
 @app.get("/import/{name}")
 def search_import(name: str):
+
     return {
         "import": name,
         "path": find_import(INDEX, name)
     }
 
+
 @app.get("/calls/{name}")
 def search_calls(name: str):
+
     return {
         "function": name,
-        "path": find_calls(INDEX, name)
+        "calls": find_calls(INDEX, name)
     }
