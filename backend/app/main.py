@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from git import Repo
+from app.vectordb import store_embeddings,semantic_search
 
 from app.scanner import scan_repository
 from app.parser import analyze_file
@@ -43,6 +44,7 @@ def analyze_repository(repo_path):
 
     global EMBEDDED_CHUNKS
     EMBEDDED_CHUNKS = embed_chunks(chunks)
+    store_embeddings(EMBEDDED_CHUNKS)
 
     print("Chunks:", len(EMBEDDED_CHUNKS))
 
@@ -55,6 +57,9 @@ INDEX = analyze_repository("repos/repository")
 
 class RepoRequest(BaseModel):
     url: str
+
+class SearchRequest(BaseModel):
+    query: str
 
 
 @app.get("/")
@@ -125,3 +130,10 @@ def search_calls(name: str):
         "function": name,
         "calls": find_calls(INDEX, name)
     }
+
+@app.post("/semantic-search")
+def semantic_code_search(request: SearchRequest):
+
+    results = semantic_search(request.query)
+
+    return results
