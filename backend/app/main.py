@@ -1,7 +1,8 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from git import Repo
-from app.vectordb import store_embeddings,semantic_search
+from app.vectordb import store_embeddings, semantic_search
+from app.llm import ask_llm
 
 from app.scanner import scan_repository
 from app.parser import analyze_file
@@ -14,10 +15,26 @@ from app.search import (
 )
 from app.chunker import chunk_repository
 from app.embeddings import embed_chunks
+from app.retriever import filter_results
+from app.summary import summarize_repository
+from app.explainer import explain_file
+from app.references import find_references
+from app.callgraph import build_call_graph
+from app.dependency import get_dependencies
+from app.architecture import generate_architecture
 
 app = FastAPI()
+from fastapi.middleware.cors import CORSMiddleware
 
-# Stores embeddings in memory
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+REPOSITORY_DATA = []
 EMBEDDED_CHUNKS = []
 
 
@@ -33,10 +50,15 @@ def analyze_repository(repo_path):
 
             result = analyze_file(file["full_path"])
 
-            repository_data.append({
-                "path": file["path"],
-                "analysis": result
-            })
+            repository_data.append(
+                {
+                    "path": file["path"],
+                    "analysis": result,
+                }
+            )
+
+    global REPOSITORY_DATA
+    REPOSITORY_DATA = repository_data
 
     index = build_index(repository_data)
 
@@ -44,6 +66,7 @@ def analyze_repository(repo_path):
 
     global EMBEDDED_CHUNKS
     EMBEDDED_CHUNKS = embed_chunks(chunks)
+
     store_embeddings(EMBEDDED_CHUNKS)
 
     print("Chunks:", len(EMBEDDED_CHUNKS))
@@ -51,16 +74,40 @@ def analyze_repository(repo_path):
     return index
 
 
-# Build the repository once when the server starts
-INDEX = analyze_repository("repos/repository")
+INDEX = None
 
+
+# ---------------- Request Models ----------------
 
 class RepoRequest(BaseModel):
     url: str
 
+
 class SearchRequest(BaseModel):
     query: str
 
+
+class AskRequest(BaseModel):
+    question: str
+
+
+class ExplainRequest(BaseModel):
+    path: str
+
+
+class ReferenceRequest(BaseModel):
+    function: str
+
+class CallGraphRequest(BaseModel):
+    function: str
+
+class DependencyRequest(BaseModel):
+    path: str
+
+class ArchitectureRequest(BaseModel):
+    path: str
+
+# ---------------- Routes ----------------
 
 @app.get("/")
 def home():
@@ -131,9 +178,122 @@ def search_calls(name: str):
         "calls": find_calls(INDEX, name)
     }
 
+
 @app.post("/semantic-search")
 def semantic_code_search(request: SearchRequest):
 
-    results = semantic_search(request.query)
+    return semantic_search(request.query)
 
-    return results
+
+@app.post("/ask")
+def ask_repository(request: AskRequest):
+
+    results = semantic_search(request.question)
+
+    filtered = filter_results(results)
+
+    context = ""
+
+    for chunk in filtered:
+        context += chunk["text"] + "\n\n"
+
+    answer = ask_llm(
+        request.question,
+        context
+    )
+
+    return {
+        "answer": answer,
+        "sources": [chunk["metadata"] for chunk in filtered]
+    }
+
+
+@app.get("/summary")
+def repository_summary():
+
+    summary = summarize_repository(REPOSITORY_DATA)
+
+    return {
+        "summary": summary
+    }
+
+
+@app.post("/explain-file")
+def explain(request: ExplainRequest):
+
+    explanation = explain_file(request.path)
+
+    return {
+        "path": request.path,
+        "explanation": explanation
+    }
+
+@app.post("/references")
+def references(request: ReferenceRequest):
+
+    files = scan_repository("repos/repository")
+
+    result = find_references(
+        files,
+        request.function
+    )
+
+    return {
+        "function": request.function,
+        "references": result
+    }
+
+@app.post("/build")
+def build_repository():
+
+    global INDEX
+
+    INDEX = analyze_repository("repos/repository")
+
+    return {
+        "message": "Repository indexed successfully",
+        "chunks": len(EMBEDDED_CHUNKS)
+    }
+
+@app.post("/call-graph")
+def call_graph(request: CallGraphRequest):
+
+    files = scan_repository("repos/repository")
+
+    graph = build_call_graph(files)
+
+    return {
+        "function": request.function,
+        "calls": graph.get(request.function, [])
+    }
+
+@app.post("/dependencies")
+def dependencies(request: DependencyRequest):
+
+    imports = get_dependencies(request.path)
+
+    return {
+        "file": request.path,
+        "dependencies": imports
+    }
+
+@app.get("/architecture")
+def architecture():
+
+    files = scan_repository("repos/repository")
+
+    return generate_architecture(files)
+
+class ArchitectureRequest(BaseModel):
+    path: str
+
+
+@app.post("/architecture")
+def architecture_folder(request: ArchitectureRequest):
+
+    files = scan_repository("repos/repository")
+
+    return generate_architecture(
+        files,
+        request.path
+    )

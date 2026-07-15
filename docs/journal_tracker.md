@@ -1,1 +1,1 @@
-Day 1: 
+Day 1: uvicorn:  uvicorn app.main:app --reload

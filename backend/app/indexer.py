@@ -14,7 +14,7 @@ def build_index(repository_data):
 
         # Index functions
         for function in analysis["functions"]:
-            index["functions"][function] = path
+             index["functions"][function["name"]] = path
 
         # Index classes
         for cls in analysis["classes"]:

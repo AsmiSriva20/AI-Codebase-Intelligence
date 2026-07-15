@@ -49,7 +49,7 @@ def collection_size():
     return collection.count()
 
 
-def search_similar(query_embedding, n_results=5):
+def search_similar(query_embedding, n_results=15):
     """
     Search using an already-created embedding.
     """

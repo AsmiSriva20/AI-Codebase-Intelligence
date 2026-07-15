@@ -1,0 +1,90 @@
+INSERT INTO "embedding_metadata" ("id", "key", "string_value", "int_value", "float_value", "bool_value") VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?) ON CONFLICT ("id", "key") DO UPDATE SET "string_value" = "excluded"."string_value", "int_value" = "excluded"."int_value", "float_value" = "excluded"."float_value", "bool_value" = "excluded"."bool_value"ÿÿÿÿÿÿÿ        if iscoroutinefunction(func):
+            return self.async_to_sync(func)
+
+        return funcn/").dali`` command and parameter callbacks.
+    """
+
+    @click.pass_context
+    def decorator(ctx: click.Context, /, *args: t.Any, **kwargs: t.Any) -> t.Any:
+        if not current_app:
+            app = ctx.ensure_object(ScriptInfo).load_app()
+            ctx.with_resource(app.app_context())
+
+        return ctx.invoke(f, *args, **kwargs)
+
+    return update_wrapper(decorator, f)  # type: ignore[return-value]wrapper=self.ensure_sync, exc=exc)
+
+        collect_errors.raise_any("Errors during app tearclude the
+        scheme and domain. When not in an active request, URLs are
+        external by default.
+    :param values: Values to use for the variable parts of the URL rule.
+        Unknown keys are appended as query string arguments, like
+        ``?a=b&c=d``.
+
+    .. versionchanged:: 2.2
+        Calls ``current_app.url_for``, allowing an app to override the
+        behavior.
+
+    .. versionchanged:: 0.10
+       The ``_scheme`` parameter was added.
+
+    .. versionchanged:: 0.9
+       The ``_anchor`` and ``_method`` parameters were added.
+
+    .. versionchanged:: 0.9
+       Calls ``app.handle_url_build_error`` on build errors.
+    """
+    return current_app.url_for(
+        endpoint,
+        _anchor=_anchor,
+        _method=_method,
+        _scheme=_scheme,
+        _external=_external,
+        **values,
+    )t args:\r\n        return current_app.response_class()\r\n    if len(args) == 1:\r\n        args = args[0]\r\n    return current_app.make_response(args)", expected a boolea ``view_func.__name__``.
+        :param view_func: The view function to associate with the
+            endpoint name.
+        :param provide_automatic_options: Add the ``OPTIONS`` method and
+            respond to ``OPTIONS`` requests automatically.
+        :param options: Extra options passed to the
+            :class:`~werkzeug.routing.Rule` object.
+        """
+        raise NotImplementedErrornt data into parent.
+        if first_bp_registration or first_name_registration:
+            self._merge_blueprint_funcs(app, name)
+
+        for deferred in self.deferred_functions:
+            deferred(state)
+
+        cli_resolved_group = options.get("cli_group", self.cli_group)
+
+        if self.cli.commands:
+            if cli_resolved_group is None:
+                app.cli.commands.update(self.cli.commands)
+            elif cli_resolved_group is _sentinel:
+                self.cli.name = name
+                app.cli.add_command(self.cli)
+            else:
+                self.cli.name = cli_resolved_group
+                app.cli.add_command(self.cli)
+
+        for blueprint, bp_options in self._blueprints:
+            bp_options = bp_options.copy()
+            bp_url_prefix = bp_options.get("url_prefix")
+            bp_subdomain = bp_options.get("subdomain")
+
+            if bp_subdomain is None:
+                bp_subdomain = blueprint.subdomain
+
+            if state.subdomain is not None and bp_subdomain is not None:
+                bp_options["subdomain"] = bp_subdomain + "." + state.subdomain
+            elif bp_subdomain is not None:
+                bp_options["subdomain"] = bp_subdomain
+            elif state.subdomain is not None:
+                bp_options["subdomain"] = state.subdomain
+
+            if bp_url_prefix is None:
+                bp_url_prefix = blueprint.url_prefix
+
+            if state.url_prefix is not None and bp_url_prefix is not None:
+                bp_op
