@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import CodeViewer from './CodeViewer';
 import { buttonStyle, labelStyle, FONT } from '../constants/ui';
+import { severityColor } from '../constants/severity';
 
-const TABS = [
+const BASE_TABS = [
   { key: 'ast', label: 'Structure' },
   { key: 'code', label: 'Source' },
   { key: 'ai', label: 'AI Explainer' },
@@ -14,8 +15,12 @@ export default function SidebarDrawer({
   fileInfo,
   loadingFile,
   activeTheme,
+  issues = [],
 }) {
   const [activeTab, setActiveTab] = useState('ast');
+  const tabs = issues.length > 0
+    ? [...BASE_TABS, { key: 'issues', label: `Issues (${issues.length})` }]
+    : BASE_TABS;
   const [fileExplanation, setFileExplanation] = useState(null);
   const [loadingAi, setLoadingAi] = useState(false);
   const [selectedTargetFn, setSelectedTargetFn] = useState(null);
@@ -84,7 +89,7 @@ export default function SidebarDrawer({
       </div>
 
       <div style={{ display: 'flex', borderBottom: `1px solid ${activeTheme.border}` }}>
-        {TABS.map((tab) => (
+        {tabs.map((tab) => (
           <button
             key={tab.key}
             onClick={() => { setActiveTab(tab.key); if (tab.key === 'ai') fetchFileExplanation(); }}
@@ -173,6 +178,67 @@ export default function SidebarDrawer({
               Generate explanation
             </button>
           )
+        )}
+
+        {activeTab === 'issues' && (
+          <div>
+            {issues.map((finding, i) => (
+              <div key={i} style={{
+                display: 'flex',
+                gap: '8px',
+                padding: '10px 0',
+                borderTop: i === 0 ? 'none' : `1px solid ${activeTheme.border}`,
+              }}>
+                <span style={{
+                  flexShrink: 0,
+                  width: '6px',
+                  height: '6px',
+                  borderRadius: '50%',
+                  marginTop: '5px',
+                  background: severityColor(activeTheme, finding.severity),
+                }} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'baseline' }}>
+                    <span style={{ fontSize: '12px', color: activeTheme.text, fontWeight: 600 }}>{finding.message}</span>
+                    <span style={{ fontSize: '10.5px', color: activeTheme.textFaint, fontFamily: FONT.mono, flexShrink: 0 }}>L{finding.line}</span>
+                  </div>
+                  {finding.snippet && (
+                    <code style={{
+                      display: 'block',
+                      marginTop: '4px',
+                      fontSize: '11px',
+                      fontFamily: FONT.mono,
+                      color: activeTheme.textMuted,
+                      background: activeTheme.surfaceAlt,
+                      border: `1px solid ${activeTheme.border}`,
+                      borderRadius: '5px',
+                      padding: '4px 6px',
+                      overflowX: 'auto',
+                      whiteSpace: 'pre',
+                    }}>
+                      {finding.snippet}
+                    </code>
+                  )}
+                  {finding.solution && (
+                    <div style={{
+                      display: 'flex',
+                      gap: '6px',
+                      marginTop: '6px',
+                      padding: '6px 8px',
+                      borderRadius: '6px',
+                      background: activeTheme.successSoft,
+                      border: `1px solid ${activeTheme.success}33`,
+                    }}>
+                      <span style={{ fontSize: '11px', color: activeTheme.text, lineHeight: 1.5 }}>
+                        <strong style={{ color: activeTheme.success }}>Fix: </strong>
+                        {finding.solution}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </aside>

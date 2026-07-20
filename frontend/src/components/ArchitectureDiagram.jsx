@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import ReactFlow, {
   Background,
   Controls,
+  MiniMap,
+  Panel,
   useNodesState,
   useEdgesState,
   MarkerType,
@@ -9,23 +11,29 @@ import ReactFlow, {
   ReactFlowProvider,
 } from 'reactflow';
 import dagre from 'dagre';
+import { ShieldAlert, ArrowLeft, RefreshCw, ChevronRight, Home } from 'lucide-react';
 import 'reactflow/dist/style.css';
 
-import FileNode from './FileNode';
+import FileNode, { NODE_WIDTH, NODE_HEIGHT } from './FileNode';
 import SidebarDrawer from './SidebarDrawer';
-import ChatDrawer from './ChatDrawer';
 import GraphToolbar from './GraphToolbar';
 import RepoImportBar from './RepoImportBar';
-import { THEMES, DEFAULT_THEME } from '../constants/themes';
 import { buttonStyle, inputStyle, labelStyle, FONT } from '../constants/ui';
+import { severityColor, topSeverity } from '../constants/severity';
 
-const getLayoutedElements = (nodes, edges, themeKey) => {
+const EXTENSION_LEGEND = [
+  { ext: 'py', color: '#3b82f6' },
+  { ext: 'js/jsx', color: '#f0b429' },
+  { ext: 'ts/tsx', color: '#3178c6' },
+];
+
+const getLayoutedElements = (nodes, edges, theme) => {
   const dagreGraph = new dagre.graphlib.Graph();
   dagreGraph.setDefaultEdgeLabel(() => ({}));
-  dagreGraph.setGraph({ rankdir: 'TB', nodesep: 45, ranksep: 75 });
+  dagreGraph.setGraph({ rankdir: 'TB', nodesep: 55, ranksep: 90 });
 
   nodes.forEach((node) => {
-    dagreGraph.setNode(node.id, { width: 160, height: 50 });
+    dagreGraph.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
   });
 
   edges.forEach((edge) => {
@@ -33,16 +41,15 @@ const getLayoutedElements = (nodes, edges, themeKey) => {
   });
 
   dagre.layout(dagreGraph);
-  const theme = THEMES[themeKey];
 
   const layoutedNodes = nodes.map((node) => {
     const nodeWithPosition = dagreGraph.node(node.id);
     return {
       ...node,
-      data: { ...node.data, currentTheme: themeKey },
+      data: { ...node.data, currentTheme: theme.mode },
       position: {
-        x: nodeWithPosition.x - 80,
-        y: nodeWithPosition.y - 25,
+        x: nodeWithPosition.x - NODE_WIDTH / 2,
+        y: nodeWithPosition.y - NODE_HEIGHT / 2,
       },
     };
   });
@@ -50,6 +57,7 @@ const getLayoutedElements = (nodes, edges, themeKey) => {
   const layoutedEdges = edges.map((edge) => ({
     ...edge,
     type: 'smoothstep',
+    pathOptions: { borderRadius: 12 },
     style: { stroke: theme.edge, strokeWidth: 1.5, opacity: 0.8 },
     markerEnd: { type: MarkerType.ArrowClosed, color: theme.edge, width: 14, height: 14 },
   }));
@@ -57,38 +65,26 @@ const getLayoutedElements = (nodes, edges, themeKey) => {
   return { nodes: layoutedNodes, edges: layoutedEdges };
 };
 
-function ThemeToggle({ theme, onToggle }) {
-  const isDark = theme.mode === 'dark';
-  return (
-    <button
-      onClick={onToggle}
-      title={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
-      style={buttonStyle(theme, 'secondary', { padding: '8px 12px' })}
-    >
-      {isDark ? '🌙 Dark' : '☀️ Light'}
-    </button>
-  );
-}
-
-function DiagramContent() {
+function DiagramContent({ activeTheme, issuesReport, focusFile, onConsumeFocusFile, onRepositoryChanged }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const [themeKey, setThemeKey] = useState(DEFAULT_THEME);
   const [folderInput, setFolderInput] = useState('');
   const [availableFolders, setAvailableFolders] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
 
+  const [currentScope, setCurrentScope] = useState('');
+  const [scopeHistory, setScopeHistory] = useState([]);
+
   const [selectedFile, setSelectedFile] = useState(null);
+  const [hoveredFile, setHoveredFile] = useState(null);
   const [fileInfo, setFileInfo] = useState(null);
   const [loadingFile, setLoadingFile] = useState(false);
-  const [chatOpen, setChatOpen] = useState(false);
   const [graphLoaded, setGraphLoaded] = useState(false);
 
-  const { fitView } = useReactFlow();
+  const { fitView, setCenter } = useReactFlow();
   const nodeTypes = useMemo(() => ({ fileNode: FileNode }), []);
-  const activeTheme = THEMES[themeKey];
 
-  const loadArchitecture = useCallback(async (folderPath = '') => {
+  const loadArchitecture = useCallback(async (folderPath = '', { recordHistory = true } = {}) => {
     try {
       let response;
       if (folderPath && folderPath.trim() !== '') {
@@ -121,43 +117,134 @@ function DiagramContent() {
       ));
       setAvailableFolders(folders);
 
-      const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(rawNodes, rawEdges, themeKey);
+      const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(rawNodes, rawEdges, activeTheme);
       setNodes(layoutedNodes);
       setEdges(layoutedEdges);
       setGraphLoaded(true);
+
+      if (recordHistory && folderPath !== currentScope) {
+        setScopeHistory((prev) => [...prev, currentScope]);
+      }
+      setCurrentScope(folderPath);
+      setFolderInput(folderPath);
 
       setTimeout(() => fitView({ padding: 0.25, duration: 400 }), 50);
     } catch (err) {
       console.error('Failed to load architecture graph:', err);
     }
-  }, [themeKey, setNodes, setEdges, fitView]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentScope, setNodes, setEdges, fitView]);
+
+  const handleBack = useCallback(() => {
+    if (scopeHistory.length === 0) return;
+    const previousScope = scopeHistory[scopeHistory.length - 1];
+    setScopeHistory((prev) => prev.slice(0, -1));
+    loadArchitecture(previousScope, { recordHistory: false });
+  }, [scopeHistory, loadArchitecture]);
+
+  const handleRefresh = useCallback(() => {
+    loadArchitecture(currentScope, { recordHistory: false });
+  }, [currentScope, loadArchitecture]);
+
+  const handleClearScope = useCallback(() => {
+    setScopeHistory([]);
+    loadArchitecture('', { recordHistory: false });
+  }, [loadArchitecture]);
+
+  const breadcrumbSegments = useMemo(() => {
+    if (!currentScope) return [];
+    const parts = currentScope.split('/').filter(Boolean);
+    return parts.map((part, i) => ({ name: part, path: parts.slice(0, i + 1).join('/') }));
+  }, [currentScope]);
 
   useEffect(() => {
     loadArchitecture();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Escape clears the current selection/sidebar from anywhere on the canvas.
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && selectedFile) setSelectedFile(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedFile]);
+
   // Re-tag existing nodes/edges when the theme changes, without refetching.
   useEffect(() => {
-    setNodes((prev) => prev.map((n) => ({ ...n, data: { ...n.data, currentTheme: themeKey } })));
+    setNodes((prev) => prev.map((n) => ({ ...n, data: { ...n.data, currentTheme: activeTheme.mode } })));
     setEdges((prev) => prev.map((e) => ({
       ...e,
       style: { ...e.style, stroke: activeTheme.edge },
       markerEnd: { ...e.markerEnd, color: activeTheme.edge },
     })));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [themeKey]);
+  }, [activeTheme.mode]);
+
+  const issuesByFile = issuesReport?.by_file || {};
+
+  // Stamp each node with its highest-severity finding so the graph itself
+  // surfaces "attention required" files without opening a separate panel.
+  useEffect(() => {
+    setNodes((prev) => prev.map((n) => {
+      const findings = issuesByFile[n.data.path];
+      const severity = findings ? topSeverity(findings) : null;
+      if (n.data.issueSeverity === severity && n.data.issueCount === (findings?.length || 0)) {
+        return n;
+      }
+      return {
+        ...n,
+        data: { ...n.data, issueSeverity: severity, issueCount: findings?.length || 0 },
+      };
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [issuesReport]);
+
+  const focusOnFile = useCallback((path) => {
+    const target = nodes.find((n) => n.id === path);
+    setSelectedFile(path);
+    if (target) {
+      setCenter(target.position.x + NODE_WIDTH / 2, target.position.y + NODE_HEIGHT / 2, { zoom: 1, duration: 400 });
+    }
+    (async () => {
+      setLoadingFile(true);
+      try {
+        const response = await fetch(`http://localhost:8000/file-info?path=${encodeURIComponent(path)}`);
+        setFileInfo(await response.json());
+      } catch (err) {
+        console.error('Failed to fetch file details:', err);
+        setFileInfo(null);
+      } finally {
+        setLoadingFile(false);
+      }
+    })();
+  }, [nodes, setCenter]);
+
+  // Jump to a file requested from the Code Health tab, once the graph has it.
+  useEffect(() => {
+    if (!focusFile) return;
+    const target = nodes.find((n) => n.id === focusFile);
+    if (!target) return;
+    focusOnFile(focusFile);
+    onConsumeFocusFile?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusFile, nodes]);
+
+  // Hovering previews connections the same way a click would, but only when
+  // nothing is already selected — a click always wins over a hover.
+  const previewFile = selectedFile || hoveredFile;
 
   const activeNodes = useMemo(() => {
     return nodes.map((node) => {
       const matchesSearch = !searchQuery || node.data.path.toLowerCase().includes(searchQuery.toLowerCase());
 
       let isConnected = false;
-      if (selectedFile) {
-        if (node.id === selectedFile) isConnected = true;
+      if (previewFile) {
+        if (node.id === previewFile) isConnected = true;
         edges.forEach((e) => {
-          if ((e.source === selectedFile && e.target === node.id) ||
-              (e.target === selectedFile && e.source === node.id)) {
+          if ((e.source === previewFile && e.target === node.id) ||
+              (e.target === previewFile && e.source === node.id)) {
             isConnected = true;
           }
         });
@@ -168,101 +255,52 @@ function DiagramContent() {
       return {
         ...node,
         style: {
-          opacity: matchesSearch && isConnected ? 1 : 0.15,
-          transition: 'opacity 0.2s ease',
+          opacity: matchesSearch && isConnected ? 1 : (selectedFile ? 0.15 : 0.35),
+          transition: 'opacity 0.15s ease',
         },
       };
     });
-  }, [nodes, edges, searchQuery, selectedFile]);
+  }, [nodes, edges, searchQuery, previewFile, selectedFile]);
 
   const activeEdges = useMemo(() => {
     return edges.map((edge) => {
-      const isConnected = !selectedFile || edge.source === selectedFile || edge.target === selectedFile;
+      const isConnected = !previewFile || edge.source === previewFile || edge.target === previewFile;
       return {
         ...edge,
         style: {
           ...edge.style,
-          opacity: isConnected ? 0.9 : 0.08,
-          strokeWidth: isConnected && selectedFile ? 2.5 : 1.5,
+          opacity: isConnected ? 0.9 : (selectedFile ? 0.08 : 0.25),
+          strokeWidth: isConnected && previewFile ? 2.5 : 1.5,
         },
       };
     });
-  }, [edges, selectedFile]);
+  }, [edges, previewFile, selectedFile]);
 
-  const handleNodeClick = useCallback(async (event, node) => {
-    const filePath = node.data?.path || node.id;
-    setSelectedFile(filePath);
-    setLoadingFile(true);
+  const handleNodeClick = useCallback((event, node) => {
+    focusOnFile(node.data?.path || node.id);
+  }, [focusOnFile]);
 
-    try {
-      const response = await fetch(`http://localhost:8000/file-info?path=${encodeURIComponent(filePath)}`);
-      const data = await response.json();
-      setFileInfo(data);
-    } catch (err) {
-      console.error('Failed to fetch file details:', err);
-      setFileInfo(null);
-    } finally {
-      setLoadingFile(false);
+  // Double-click drills into that file's folder, turning the graph itself
+  // into a navigable tree (paired with the Back button below).
+  const handleNodeDoubleClick = useCallback((event, node) => {
+    const path = node.data?.path || node.id;
+    const folder = path.split('/').slice(0, -1).join('/');
+    if (folder && folder !== currentScope) {
+      loadArchitecture(folder);
     }
-  }, []);
+  }, [currentScope, loadArchitecture]);
+
+  const attentionInGraph = (issuesReport?.summary?.critical || 0) + (issuesReport?.summary?.high || 0) > 0;
 
   return (
     <div style={{
-      width: '100vw',
-      height: '100vh',
+      width: '100%',
+      height: '100%',
       display: 'flex',
       flexDirection: 'column',
       backgroundColor: activeTheme.bg,
       fontFamily: FONT.sans,
     }}>
-      {/* Brand row */}
-      <header style={{
-        padding: '12px 24px',
-        backgroundColor: activeTheme.surface,
-        borderBottom: `1px solid ${activeTheme.border}`,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: '16px',
-        zIndex: 10,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div style={{
-            width: '30px',
-            height: '30px',
-            borderRadius: '8px',
-            background: activeTheme.accent,
-            color: activeTheme.accentContrast,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontWeight: 800,
-            fontSize: '13px',
-            flexShrink: 0,
-          }}>
-            AI
-          </div>
-          <div>
-            <h1 style={{ fontSize: '15px', fontWeight: 700, color: activeTheme.text, lineHeight: 1.2 }}>
-              Codebase Intelligence
-            </h1>
-            <p style={{ fontSize: '11.5px', color: activeTheme.textFaint, lineHeight: 1.2 }}>
-              Architecture explorer &amp; AI assistant
-            </p>
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <button
-            onClick={() => setChatOpen(!chatOpen)}
-            style={buttonStyle(activeTheme, chatOpen ? 'primary' : 'secondary')}
-          >
-            Ask Codebase AI
-          </button>
-          <ThemeToggle theme={activeTheme} onToggle={() => setThemeKey(themeKey === 'dark' ? 'light' : 'dark')} />
-        </div>
-      </header>
-
       {/* Toolbar row */}
       <div style={{
         padding: '10px 24px',
@@ -276,7 +314,10 @@ function DiagramContent() {
         rowGap: '10px',
         zIndex: 9,
       }}>
-        <RepoImportBar onRepoLoaded={() => loadArchitecture('')} activeTheme={activeTheme} />
+        <RepoImportBar
+          onRepoLoaded={() => { loadArchitecture(''); onRepositoryChanged?.(); }}
+          activeTheme={activeTheme}
+        />
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
           <GraphToolbar searchQuery={searchQuery} setSearchQuery={setSearchQuery} activeTheme={activeTheme} />
@@ -289,12 +330,83 @@ function DiagramContent() {
               placeholder="Scope folder (e.g. src/flask)…"
               value={folderInput}
               onChange={(e) => setFolderInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') loadArchitecture(folderInput); }}
               style={inputStyle(activeTheme, { width: '170px' })}
             />
             <button onClick={() => loadArchitecture(folderInput)} style={buttonStyle(activeTheme, 'secondary')}>
               Filter
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Navigation row: back / refresh / breadcrumb */}
+      <div style={{
+        padding: '7px 24px',
+        backgroundColor: activeTheme.surface,
+        borderBottom: `1px solid ${activeTheme.border}`,
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        flexWrap: 'wrap',
+      }}>
+        <button
+          onClick={handleBack}
+          disabled={scopeHistory.length === 0}
+          title="Back to the previous view"
+          style={buttonStyle(activeTheme, 'ghost', {
+            padding: '5px 9px',
+            fontSize: '11.5px',
+            opacity: scopeHistory.length === 0 ? 0.4 : 1,
+            cursor: scopeHistory.length === 0 ? 'default' : 'pointer',
+          })}
+        >
+          <ArrowLeft size={12} />
+          Back
+        </button>
+        <button
+          onClick={handleRefresh}
+          title="Refresh the current view"
+          style={buttonStyle(activeTheme, 'ghost', { padding: '5px 9px', fontSize: '11.5px' })}
+        >
+          <RefreshCw size={12} />
+          Refresh
+        </button>
+
+        <div style={{ width: '1px', height: '15px', background: activeTheme.border, margin: '0 4px' }} />
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flexWrap: 'wrap' }}>
+          <button
+            onClick={handleClearScope}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '4px',
+              background: 'none', border: 'none', cursor: 'pointer',
+              padding: '3px 5px', borderRadius: '5px',
+              color: currentScope ? activeTheme.textMuted : activeTheme.accent,
+              fontWeight: currentScope ? 500 : 700,
+              fontSize: '11.5px', fontFamily: FONT.sans,
+            }}
+          >
+            <Home size={11} />
+            All files
+          </button>
+          {breadcrumbSegments.map((seg, i) => (
+            <span key={seg.path} style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+              <ChevronRight size={11} color={activeTheme.textFaint} />
+              <button
+                onClick={() => loadArchitecture(seg.path)}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  padding: '3px 5px', borderRadius: '5px',
+                  color: i === breadcrumbSegments.length - 1 ? activeTheme.accent : activeTheme.textMuted,
+                  fontWeight: i === breadcrumbSegments.length - 1 ? 700 : 500,
+                  fontSize: '11.5px', fontFamily: FONT.mono,
+                }}
+              >
+                {seg.name}
+              </button>
+            </span>
+          ))}
         </div>
       </div>
 
@@ -313,11 +425,11 @@ function DiagramContent() {
           {availableFolders.slice(0, 8).map((folder, idx) => (
             <button
               key={idx}
-              onClick={() => { setFolderInput(folder); loadArchitecture(folder); }}
-              style={buttonStyle(activeTheme, 'ghost', {
+              onClick={() => loadArchitecture(folder)}
+              style={buttonStyle(activeTheme, folder === currentScope ? 'primary' : 'ghost', {
                 padding: '3px 10px',
                 fontSize: '11.5px',
-                border: `1px solid ${activeTheme.border}`,
+                border: `1px solid ${folder === currentScope ? activeTheme.accent : activeTheme.border}`,
                 whiteSpace: 'nowrap',
               })}
             >
@@ -328,7 +440,19 @@ function DiagramContent() {
       )}
 
       {/* Canvas */}
-      <div style={{ flexGrow: 1, width: '100%', position: 'relative', minHeight: 0 }}>
+      <div
+        className="rf-canvas"
+        data-rf-theme={activeTheme.mode}
+        style={{
+          flexGrow: 1,
+          width: '100%',
+          position: 'relative',
+          minHeight: 0,
+          background: activeTheme.mode === 'dark'
+            ? `radial-gradient(ellipse 1200px 700px at 50% -10%, ${activeTheme.surfaceAlt} 0%, ${activeTheme.bg} 60%)`
+            : `radial-gradient(ellipse 1200px 700px at 50% -10%, #ffffff 0%, ${activeTheme.bg} 65%)`,
+        }}
+      >
         <ReactFlow
           nodes={activeNodes}
           edges={activeEdges}
@@ -336,11 +460,65 @@ function DiagramContent() {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onNodeClick={handleNodeClick}
+          onNodeDoubleClick={handleNodeDoubleClick}
+          onNodeMouseEnter={(event, node) => setHoveredFile(node.id)}
+          onNodeMouseLeave={() => setHoveredFile(null)}
+          onPaneClick={() => setSelectedFile(null)}
           fitView
           fitViewOptions={{ padding: 0.2 }}
+          minZoom={0.15}
+          maxZoom={2}
+          proOptions={{ hideAttribution: true }}
+          defaultEdgeOptions={{ type: 'smoothstep' }}
         >
-          <Background color={activeTheme.grid} gap={24} size={1} />
-          <Controls style={{ fill: activeTheme.text, backgroundColor: activeTheme.surface, border: `1px solid ${activeTheme.border}`, borderRadius: '8px', overflow: 'hidden' }} />
+          <Background variant="dots" color={activeTheme.grid} gap={22} size={1.4} />
+          <Controls
+            showInteractive={false}
+            style={{ borderRadius: '10px', overflow: 'hidden', boxShadow: activeTheme.shadowMd }}
+          />
+          <MiniMap
+            pannable
+            zoomable
+            nodeStrokeWidth={0}
+            nodeColor={(n) => (n.data?.issueSeverity ? severityColor(activeTheme, n.data.issueSeverity) : activeTheme.accent)}
+            maskColor={activeTheme.mode === 'dark' ? 'rgba(13, 17, 23, 0.65)' : 'rgba(246, 248, 250, 0.65)'}
+            style={{ borderRadius: '10px', boxShadow: activeTheme.shadowMd }}
+          />
+
+          {nodes.length > 0 && (
+            <Panel position="bottom-left" style={{ margin: '16px' }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                padding: '7px 12px',
+                borderRadius: '9px',
+                background: activeTheme.surface,
+                border: `1px solid ${activeTheme.border}`,
+                boxShadow: activeTheme.shadowMd,
+                fontSize: '11px',
+                color: activeTheme.textMuted,
+              }}>
+                <span style={{ fontFamily: FONT.mono }}>{nodes.length} files · {edges.length} edges</span>
+                <div style={{ width: '1px', height: '14px', background: activeTheme.border }} />
+                {EXTENSION_LEGEND.map(({ ext, color }) => (
+                  <span key={ext} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: color }} />
+                    {ext}
+                  </span>
+                ))}
+                {attentionInGraph && (
+                  <>
+                    <div style={{ width: '1px', height: '14px', background: activeTheme.border }} />
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '5px', color: activeTheme.danger }}>
+                      <ShieldAlert size={11} />
+                      needs attention
+                    </span>
+                  </>
+                )}
+              </div>
+            </Panel>
+          )}
         </ReactFlow>
 
         {graphLoaded && nodes.length === 0 && (
@@ -368,13 +546,7 @@ function DiagramContent() {
             fileInfo={fileInfo}
             loadingFile={loadingFile}
             activeTheme={activeTheme}
-          />
-        )}
-
-        {chatOpen && (
-          <ChatDrawer
-            onClose={() => setChatOpen(false)}
-            activeTheme={activeTheme}
+            issues={issuesByFile[selectedFile] || []}
           />
         )}
       </div>

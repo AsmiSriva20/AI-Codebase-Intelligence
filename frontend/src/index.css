@@ -48,3 +48,60 @@ input {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(140, 149, 159, 0.6);
 }
+
+/*
+ * reactflow/dist/style.css hardcodes light chrome (white control buttons,
+ * a translucent white attribution badge) that clashes with the dark theme.
+ * These overrides re-theme that chrome to match the app's active palette.
+ */
+.rf-canvas[data-rf-theme='dark'] {
+  --rfc-bg: #161b22;
+  --rfc-border: #30363d;
+  --rfc-hover: #21262d;
+  --rfc-icon: #c9d1d9;
+}
+.rf-canvas[data-rf-theme='light'] {
+  --rfc-bg: #ffffff;
+  --rfc-border: #d0d7de;
+  --rfc-hover: #f3f4f6;
+  --rfc-icon: #1f2328;
+}
+
+.rf-canvas .react-flow__controls {
+  box-shadow: none;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--rfc-border);
+}
+.rf-canvas .react-flow__controls-button {
+  background: var(--rfc-bg);
+  border-bottom: 1px solid var(--rfc-border);
+  transition: background-color 0.15s ease;
+}
+.rf-canvas .react-flow__controls-button:last-child {
+  border-bottom: none;
+}
+.rf-canvas .react-flow__controls-button:hover {
+  background: var(--rfc-hover);
+}
+.rf-canvas .react-flow__controls-button svg {
+  fill: var(--rfc-icon);
+}
+.rf-canvas .react-flow__controls-button:disabled svg {
+  fill: var(--rfc-icon);
+  fill-opacity: 0.35;
+}
+
+.rf-canvas .react-flow__minimap {
+  border-radius: 10px;
+}
+.rf-canvas .react-flow__minimap-mask {
+  stroke: var(--rfc-border);
+}
+
+.rf-canvas .react-flow__edge-path {
+  transition: stroke 0.15s ease, stroke-width 0.15s ease, opacity 0.15s ease;
+}
+.rf-canvas .react-flow__node {
+  transition: opacity 0.2s ease;
+}
