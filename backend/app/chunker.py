@@ -1,3 +1,32 @@
+WINDOW_LINES = 40
+MAX_TEXT_CHUNKS_PER_FILE = 12
+MAX_CHUNK_CHARS = 3000  # keeps embedding batches bounded regardless of source file size
+
+
+def _chunk_raw_text(text, path):
+    chunks = []
+    lines = text.split("\n")
+
+    for start in range(0, len(lines), WINDOW_LINES):
+        if len(chunks) >= MAX_TEXT_CHUNKS_PER_FILE:
+            break
+
+        window = "\n".join(lines[start:start + WINDOW_LINES]).strip()
+        if not window:
+            continue
+
+        chunks.append({
+            "text": window[:MAX_CHUNK_CHARS],
+            "metadata": {
+                "type": "text",
+                "name": path,
+                "path": path,
+            },
+        })
+
+    return chunks
+
+
 def chunk_repository(repository_data):
     chunks = []
 
@@ -10,12 +39,12 @@ def chunk_repository(repository_data):
         for function in analysis["functions"]:
 
             chunks.append({
-                "text": function["code"],
+                "text": function["code"][:MAX_CHUNK_CHARS],
                 "metadata": {
                     "type": "function",
                     "name": function["name"],
-                    "path": path
-                }
+                    "path": path,
+                },
             })
 
         # Class chunks
@@ -26,8 +55,15 @@ def chunk_repository(repository_data):
                 "metadata": {
                     "type": "class",
                     "name": cls,
-                    "path": path
-                }
+                    "path": path,
+                },
             })
+
+        # Plain-text chunks (README, configs, docs, anything without code
+        # structure) so semantic search / chat can answer questions that
+        # aren't about a specific function or class.
+        raw_text = analysis.get("raw_text")
+        if raw_text and not analysis["functions"] and not analysis["classes"]:
+            chunks.extend(_chunk_raw_text(raw_text, path))
 
     return chunks

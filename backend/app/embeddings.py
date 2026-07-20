@@ -8,14 +8,18 @@ def create_embedding(text):
 
 
 def embed_chunks(chunks):
-    embedded_chunks = []
+    if not chunks:
+        return []
 
-    for chunk in chunks:
-        embedded_chunks.append({
+    texts = [chunk["text"] for chunk in chunks]
+    vectors = model.embed(texts, batch_size=32)  # batched, but bounded to keep memory use predictable
+
+    return [
+        {
             "text": chunk["text"],
             "metadata": chunk["metadata"],
-            "embedding": create_embedding(chunk["text"])
-        })
-
-    return embedded_chunks
+            "embedding": vector.tolist(),
+        }
+        for chunk, vector in zip(chunks, vectors)
+    ]
 

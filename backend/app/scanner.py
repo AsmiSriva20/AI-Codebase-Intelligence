@@ -23,7 +23,7 @@ def scan_repository(path):
             full_path = os.path.join(root, file)
 
             files.append({
-                "path": os.path.relpath(full_path, path),
+                "path": os.path.relpath(full_path, path).replace("\\", "/"),
                 "full_path": full_path,
                 "extension": os.path.splitext(file)[1],
                 "size": os.path.getsize(full_path)
