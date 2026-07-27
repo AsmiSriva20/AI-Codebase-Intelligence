@@ -1,0 +1,33 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+python-dotenv==1.0.1
+GitPython==3.1.44
+requests==2.32.3
+
+# Parsing (core must support every grammar's ABI version below)
+tree-sitter==0.26.0
+tree-sitter-python==0.25.0
+tree-sitter-javascript==0.25.0
+tree-sitter-typescript==0.23.2
+tree-sitter-go==0.25.0
+tree-sitter-rust==0.24.2
+tree-sitter-java==0.23.5
+tree-sitter-cpp==0.23.4
+tree-sitter-c==0.24.2
+tree-sitter-ruby==0.23.1
+tree-sitter-php==0.24.1
+tree-sitter-c-sharp==0.23.5
+
+# Embeddings
+fastembed==0.5.1
+
+# LLM
+groq==0.13.1
+
+# Metadata DB (Postgres)
+SQLAlchemy==2.0.36
+psycopg2-binary==2.9.10
+
+# Vector DB
+qdrant-client==1.12.1

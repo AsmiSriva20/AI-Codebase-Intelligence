@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import CodeViewer from './CodeViewer';
+import Spinner from './Spinner';
 import { buttonStyle, labelStyle, FONT } from '../constants/ui';
 import { severityColor } from '../constants/severity';
+import { apiFetch } from '../api/client';
 
 const BASE_TABS = [
   { key: 'ast', label: 'Structure' },
@@ -30,13 +32,13 @@ export default function SidebarDrawer({
     setLoadingAi(true);
 
     try {
-      const response = await fetch('http://localhost:8000/explain-file', {
+      const response = await apiFetch('/explain-file', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: selectedFile }),
       });
       const data = await response.json();
-      setFileExplanation(data.explanation || data.result || JSON.stringify(data));
+      setFileExplanation(data.explanation || data.result || { raw: JSON.stringify(data) });
     } catch (err) {
       console.error('Failed to explain file:', err);
       setFileExplanation('Failed to generate AI explanation.');
@@ -114,7 +116,10 @@ export default function SidebarDrawer({
       <div style={{ padding: '16px', flexGrow: 1 }}>
         {activeTab === 'ast' && (
           loadingFile ? (
-            <p style={{ fontSize: '0.8rem', color: activeTheme.textMuted }}>Extracting structure…</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: activeTheme.textMuted }}>
+              <Spinner size={14} color={activeTheme.textFaint} />
+              Extracting structure…
+            </div>
           ) : fileInfo ? (
             <div>
               {fileInfo.docstring && (
@@ -168,11 +173,67 @@ export default function SidebarDrawer({
 
         {activeTab === 'ai' && (
           loadingAi ? (
-            <p style={{ fontSize: '0.8rem', color: activeTheme.accent }}>Generating explanation…</p>
-          ) : fileExplanation ? (
-            <div style={{ fontSize: '0.85rem', lineHeight: '1.55', whiteSpace: 'pre-wrap', color: activeTheme.text }}>
-              {fileExplanation}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: activeTheme.accent }}>
+              <Spinner size={14} color={activeTheme.accent} />
+              Generating explanation…
             </div>
+          ) : fileExplanation ? (
+            fileExplanation.raw ? (
+              <div style={{ fontSize: '0.85rem', lineHeight: '1.55', whiteSpace: 'pre-wrap', color: activeTheme.text }}>
+                {fileExplanation.raw}
+              </div>
+            ) : (
+              <div>
+                {fileExplanation.purpose && (
+                  <div style={{ marginBottom: '14px' }}>
+                    <span style={labelStyle(activeTheme)}>Purpose</span>
+                    <p style={{ fontSize: '12.5px', lineHeight: 1.6, color: activeTheme.text, marginTop: '6px' }}>{fileExplanation.purpose}</p>
+                  </div>
+                )}
+                {fileExplanation.main_classes?.length > 0 && (
+                  <div style={{ marginBottom: '14px' }}>
+                    <span style={labelStyle(activeTheme)}>Main Classes</span>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '6px' }}>
+                      {fileExplanation.main_classes.map((cls, i) => <span key={i} style={{ ...chipStyle, cursor: 'default' }}>{cls}</span>)}
+                    </div>
+                  </div>
+                )}
+                {fileExplanation.main_functions?.length > 0 && (
+                  <div style={{ marginBottom: '14px' }}>
+                    <span style={labelStyle(activeTheme)}>Main Functions</span>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '6px' }}>
+                      {fileExplanation.main_functions.map((fn, i) => <span key={i} style={{ ...chipStyle, cursor: 'default' }}>{fn}()</span>)}
+                    </div>
+                  </div>
+                )}
+                {fileExplanation.execution_flow && (
+                  <div style={{ marginBottom: '14px' }}>
+                    <span style={labelStyle(activeTheme)}>Execution Flow</span>
+                    <p style={{ fontSize: '12.5px', lineHeight: 1.6, color: activeTheme.text, marginTop: '6px' }}>{fileExplanation.execution_flow}</p>
+                  </div>
+                )}
+                {fileExplanation.important_logic && (
+                  <div style={{ marginBottom: '14px' }}>
+                    <span style={labelStyle(activeTheme)}>Important Logic</span>
+                    <p style={{ fontSize: '12.5px', lineHeight: 1.6, color: activeTheme.text, marginTop: '6px' }}>{fileExplanation.important_logic}</p>
+                  </div>
+                )}
+                {fileExplanation.external_dependencies?.length > 0 && (
+                  <div style={{ marginBottom: '14px' }}>
+                    <span style={labelStyle(activeTheme)}>External Dependencies</span>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '6px' }}>
+                      {fileExplanation.external_dependencies.map((dep, i) => <span key={i} style={{ ...chipStyle, cursor: 'default' }}>{dep}</span>)}
+                    </div>
+                  </div>
+                )}
+                {fileExplanation.summary && (
+                  <div>
+                    <span style={labelStyle(activeTheme)}>Summary</span>
+                    <p style={{ fontSize: '12.5px', lineHeight: 1.6, color: activeTheme.text, marginTop: '6px' }}>{fileExplanation.summary}</p>
+                  </div>
+                )}
+              </div>
+            )
           ) : (
             <button onClick={fetchFileExplanation} style={buttonStyle(activeTheme, 'secondary')}>
               Generate explanation

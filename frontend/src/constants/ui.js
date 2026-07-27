@@ -2,7 +2,7 @@ export const RADIUS = 8;
 export const RADIUS_LG = 12;
 
 export const FONT = {
-  sans: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+  sans: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
   mono: "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace",
 };
 
@@ -25,7 +25,7 @@ export function buttonStyle(theme, variant = 'secondary', extra = {}) {
     padding: '8px 14px',
     borderRadius: RADIUS,
     fontSize: '13px',
-    fontWeight: 600,
+    fontWeight: 500,
     fontFamily: FONT.sans,
     cursor: 'pointer',
     display: 'inline-flex',
@@ -33,7 +33,7 @@ export function buttonStyle(theme, variant = 'secondary', extra = {}) {
     justifyContent: 'center',
     gap: '6px',
     lineHeight: 1,
-    transition: 'background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease',
+    transition: 'background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease, color 0.15s ease',
     whiteSpace: 'nowrap',
   };
 
@@ -72,7 +72,6 @@ export function panelStyle(theme, extra = {}) {
     backgroundColor: theme.surface,
     border: `1px solid ${theme.border}`,
     borderRadius: RADIUS_LG,
-    boxShadow: theme.shadowMd,
     ...extra,
   };
 }
@@ -80,7 +79,7 @@ export function panelStyle(theme, extra = {}) {
 export function labelStyle(theme, extra = {}) {
   return {
     fontSize: '11px',
-    fontWeight: 700,
+    fontWeight: 600,
     color: theme.textFaint,
     textTransform: 'uppercase',
     letterSpacing: '0.04em',

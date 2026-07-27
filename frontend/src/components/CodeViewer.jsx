@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo } from 'react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { FONT } from '../constants/ui';
+import { apiFetch } from '../api/client';
+import Spinner from './Spinner';
 
 const LANGUAGE_BY_EXTENSION = {
   py: 'python',
@@ -32,7 +34,7 @@ export default function CodeViewer({ filePath, activeTheme, targetFunction }) {
       setError(null);
 
       try {
-        const response = await fetch(`http://localhost:8000/file-content?path=${encodeURIComponent(filePath)}`);
+        const response = await apiFetch(`/file-content?path=${encodeURIComponent(filePath)}`);
         if (!response.ok) {
           throw new Error(`Failed to load file contents (${response.status})`);
         }
@@ -61,7 +63,12 @@ export default function CodeViewer({ filePath, activeTheme, targetFunction }) {
   }, [targetFunction, code]);
 
   if (loading) {
-    return <p style={{ fontSize: '0.8rem', color: activeTheme.textMuted, fontFamily: FONT.sans }}>Loading source code…</p>;
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: activeTheme.textMuted, fontFamily: FONT.sans }}>
+        <Spinner size={14} color={activeTheme.textFaint} />
+        Loading source code…
+      </div>
+    );
   }
 
   if (error) {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import ReactFlow, {
   Background,
   Controls,
@@ -18,6 +18,9 @@ import FileNode, { NODE_WIDTH, NODE_HEIGHT } from './FileNode';
 import SidebarDrawer from './SidebarDrawer';
 import GraphToolbar from './GraphToolbar';
 import RepoImportBar from './RepoImportBar';
+import BranchSelector from './BranchSelector';
+import Spinner from './Spinner';
+import { apiFetch, wsUrl } from '../api/client';
 import { buttonStyle, inputStyle, labelStyle, FONT } from '../constants/ui';
 import { severityColor, topSeverity } from '../constants/severity';
 
@@ -80,21 +83,24 @@ function DiagramContent({ activeTheme, issuesReport, focusFile, onConsumeFocusFi
   const [fileInfo, setFileInfo] = useState(null);
   const [loadingFile, setLoadingFile] = useState(false);
   const [graphLoaded, setGraphLoaded] = useState(false);
+  const [loadingGraph, setLoadingGraph] = useState(false);
+  const [repoVersion, setRepoVersion] = useState(0);
 
   const { fitView, setCenter } = useReactFlow();
   const nodeTypes = useMemo(() => ({ fileNode: FileNode }), []);
 
   const loadArchitecture = useCallback(async (folderPath = '', { recordHistory = true } = {}) => {
+    setLoadingGraph(true);
     try {
       let response;
       if (folderPath && folderPath.trim() !== '') {
-        response = await fetch('http://localhost:8000/architecture', {
+        response = await apiFetch('/architecture', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ path: folderPath }),
         });
       } else {
-        response = await fetch('http://localhost:8000/architecture');
+        response = await apiFetch('/architecture');
       }
 
       const data = await response.json();
@@ -131,6 +137,8 @@ function DiagramContent({ activeTheme, issuesReport, focusFile, onConsumeFocusFi
       setTimeout(() => fitView({ padding: 0.25, duration: 400 }), 50);
     } catch (err) {
       console.error('Failed to load architecture graph:', err);
+    } finally {
+      setLoadingGraph(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentScope, setNodes, setEdges, fitView]);
@@ -151,6 +159,12 @@ function DiagramContent({ activeTheme, issuesReport, focusFile, onConsumeFocusFi
     loadArchitecture('', { recordHistory: false });
   }, [loadArchitecture]);
 
+  const handleBranchSwitched = useCallback(() => {
+    setScopeHistory([]);
+    loadArchitecture('', { recordHistory: false });
+    onRepositoryChanged?.();
+  }, [loadArchitecture, onRepositoryChanged]);
+
   const breadcrumbSegments = useMemo(() => {
     if (!currentScope) return [];
     const parts = currentScope.split('/').filter(Boolean);
@@ -160,6 +174,58 @@ function DiagramContent({ activeTheme, issuesReport, focusFile, onConsumeFocusFi
   useEffect(() => {
     loadArchitecture();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Kept in a ref so the WebSocket effect below can always call the latest
+  // refresh logic without needing to tear down and reopen the socket every
+  // time the user navigates to a different folder scope.
+  const handleRefreshRef = useRef(handleRefresh);
+  useEffect(() => {
+    handleRefreshRef.current = handleRefresh;
+  }, [handleRefresh]);
+
+  const onRepositoryChangedRef = useRef(onRepositoryChanged);
+  useEffect(() => {
+    onRepositoryChangedRef.current = onRepositoryChanged;
+  }, [onRepositoryChanged]);
+
+  // Live graph updates (§6): subscribe once for the component's lifetime,
+  // reconnecting on drop, and refresh the current view whenever the backend
+  // broadcasts that a webhook-triggered rebuild finished.
+  useEffect(() => {
+    let socket;
+    let reconnectTimer;
+    let cancelled = false;
+
+    const connect = () => {
+      socket = new WebSocket(wsUrl('/events/graph'));
+
+      socket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'graph_updated') {
+            handleRefreshRef.current?.();
+            onRepositoryChangedRef.current?.();
+          }
+        } catch (err) {
+          console.error('Failed to parse graph event:', err);
+        }
+      };
+
+      socket.onclose = () => {
+        if (!cancelled) reconnectTimer = setTimeout(connect, 3000);
+      };
+
+      socket.onerror = () => socket.close();
+    };
+
+    connect();
+
+    return () => {
+      cancelled = true;
+      clearTimeout(reconnectTimer);
+      socket?.close();
+    };
   }, []);
 
   // Escape clears the current selection/sidebar from anywhere on the canvas.
@@ -210,7 +276,7 @@ function DiagramContent({ activeTheme, issuesReport, focusFile, onConsumeFocusFi
     (async () => {
       setLoadingFile(true);
       try {
-        const response = await fetch(`http://localhost:8000/file-info?path=${encodeURIComponent(path)}`);
+        const response = await apiFetch(`/file-info?path=${encodeURIComponent(path)}`);
         setFileInfo(await response.json());
       } catch (err) {
         console.error('Failed to fetch file details:', err);
@@ -315,11 +381,15 @@ function DiagramContent({ activeTheme, issuesReport, focusFile, onConsumeFocusFi
         zIndex: 9,
       }}>
         <RepoImportBar
-          onRepoLoaded={() => { loadArchitecture(''); onRepositoryChanged?.(); }}
+          onRepoLoaded={() => { loadArchitecture(''); onRepositoryChanged?.(); setRepoVersion((v) => v + 1); }}
           activeTheme={activeTheme}
         />
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <BranchSelector activeTheme={activeTheme} onBranchSwitched={handleBranchSwitched} refreshKey={repoVersion} />
+
+          <div style={{ width: '1px', height: '22px', backgroundColor: activeTheme.border }} />
+
           <GraphToolbar searchQuery={searchQuery} setSearchQuery={setSearchQuery} activeTheme={activeTheme} />
 
           <div style={{ width: '1px', height: '22px', backgroundColor: activeTheme.border }} />
@@ -366,10 +436,16 @@ function DiagramContent({ activeTheme, issuesReport, focusFile, onConsumeFocusFi
         </button>
         <button
           onClick={handleRefresh}
+          disabled={loadingGraph}
           title="Refresh the current view"
-          style={buttonStyle(activeTheme, 'ghost', { padding: '5px 9px', fontSize: '11.5px' })}
+          style={buttonStyle(activeTheme, 'ghost', {
+            padding: '5px 9px',
+            fontSize: '11.5px',
+            opacity: loadingGraph ? 0.6 : 1,
+            cursor: loadingGraph ? 'default' : 'pointer',
+          })}
         >
-          <RefreshCw size={12} />
+          {loadingGraph ? <Spinner size={12} color={activeTheme.textMuted} /> : <RefreshCw size={12} />}
           Refresh
         </button>
 
@@ -448,9 +524,7 @@ function DiagramContent({ activeTheme, issuesReport, focusFile, onConsumeFocusFi
           width: '100%',
           position: 'relative',
           minHeight: 0,
-          background: activeTheme.mode === 'dark'
-            ? `radial-gradient(ellipse 1200px 700px at 50% -10%, ${activeTheme.surfaceAlt} 0%, ${activeTheme.bg} 60%)`
-            : `radial-gradient(ellipse 1200px 700px at 50% -10%, #ffffff 0%, ${activeTheme.bg} 65%)`,
+          background: activeTheme.bg,
         }}
       >
         <ReactFlow
@@ -521,7 +595,23 @@ function DiagramContent({ activeTheme, issuesReport, focusFile, onConsumeFocusFi
           )}
         </ReactFlow>
 
-        {graphLoaded && nodes.length === 0 && (
+        {loadingGraph && !graphLoaded && (
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '10px',
+            pointerEvents: 'none',
+          }}>
+            <Spinner size={22} color={activeTheme.textFaint} />
+            <p style={{ fontSize: '12.5px', color: activeTheme.textMuted }}>Loading architecture graph…</p>
+          </div>
+        )}
+
+        {graphLoaded && !loadingGraph && nodes.length === 0 && (
           <div style={{
             position: 'absolute',
             inset: 0,

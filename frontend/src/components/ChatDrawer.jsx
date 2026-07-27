@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { buttonStyle, inputStyle, FONT } from '../constants/ui';
+import { apiFetch } from '../api/client';
+import Spinner from './Spinner';
 
 export default function ChatDrawer({ onClose, activeTheme }) {
   const [chatQuery, setChatQuery] = useState('');
@@ -18,7 +20,7 @@ export default function ChatDrawer({ onClose, activeTheme }) {
     setChatLoading(true);
 
     try {
-      const response = await fetch('http://localhost:8000/ask', {
+      const response = await apiFetch('/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question: userMessage }),
@@ -86,7 +88,8 @@ export default function ChatDrawer({ onClose, activeTheme }) {
           </div>
         ))}
         {chatLoading && (
-          <div style={{ alignSelf: 'flex-start', fontSize: '0.75rem', color: activeTheme.textFaint, fontStyle: 'italic' }}>
+          <div style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: '7px', fontSize: '0.75rem', color: activeTheme.textFaint, fontStyle: 'italic' }}>
+            <Spinner size={13} color={activeTheme.textFaint} />
             Searching vector DB &amp; generating response…
           </div>
         )}

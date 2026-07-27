@@ -1,10 +1,21 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ShieldAlert, Search, ExternalLink, ChevronDown, ChevronRight,
-  Lightbulb, PackageSearch, RefreshCw, FolderSearch,
+  Lightbulb, PackageSearch, RefreshCw, FolderSearch, Flame, Trash2, Info,
 } from 'lucide-react';
 import { inputStyle, labelStyle, buttonStyle, FONT } from '../constants/ui';
 import { SEVERITY_ORDER, SEVERITY_LABEL, severityColor, severitySoft } from '../constants/severity';
+import { apiFetch } from '../api/client';
+import Spinner from './Spinner';
+
+function LoadingRow({ theme, label }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: theme.textMuted, fontSize: '12.5px', padding: '20px 4px' }}>
+      <Spinner size={14} color={theme.textFaint} />
+      {label}
+    </div>
+  );
+}
 
 const RISK_WEIGHT = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
 const CATEGORIES = ['all', 'security', 'quality'];
@@ -184,11 +195,74 @@ function DependencyCard({ theme, dep }) {
   );
 }
 
-export default function CodeHealthView({ activeTheme: theme, issuesReport, depReport, onNavigateToFile, onRefresh }) {
+function HotspotRow({ theme, hotspot, maxChurn, onNavigateToFile }) {
+  const pct = maxChurn > 0 ? Math.round((hotspot.churn / maxChurn) * 100) : 0;
+  return (
+    <button
+      onClick={() => onNavigateToFile(hotspot.path)}
+      style={{
+        display: 'flex', alignItems: 'center', gap: '10px', width: '100%',
+        padding: '9px 12px', marginBottom: '6px', borderRadius: '8px',
+        border: `1px solid ${theme.border}`, background: theme.surface,
+        cursor: 'pointer', textAlign: 'left',
+      }}
+    >
+      <span style={{
+        flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        fontSize: '12.5px', fontFamily: FONT.mono, color: theme.text, fontWeight: 600,
+      }}>
+        {hotspot.path}
+      </span>
+      <div style={{ width: '90px', height: '5px', borderRadius: '3px', background: theme.surfaceAlt, flexShrink: 0 }}>
+        <div style={{ width: `${pct}%`, height: '100%', borderRadius: '3px', background: theme.accent }} />
+      </div>
+      <span style={{ fontSize: '11px', color: theme.textMuted, fontFamily: FONT.mono, flexShrink: 0, minWidth: '70px', textAlign: 'right' }}>
+        {hotspot.churn} commit{hotspot.churn === 1 ? '' : 's'}
+      </span>
+    </button>
+  );
+}
+
+function DeadCodeRow({ theme, item, onNavigateToFile }) {
+  return (
+    <button
+      onClick={() => onNavigateToFile(item.path)}
+      style={{
+        display: 'flex', alignItems: 'center', gap: '10px', width: '100%',
+        padding: '9px 12px', marginBottom: '6px', borderRadius: '8px',
+        border: `1px solid ${theme.border}`, background: theme.surface,
+        cursor: 'pointer', textAlign: 'left',
+      }}
+    >
+      <span style={{
+        fontSize: '9.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em',
+        color: theme.textMuted, background: theme.surfaceAlt, borderRadius: '5px',
+        padding: '2px 6px', flexShrink: 0,
+      }}>
+        {item.type}
+      </span>
+      <span style={{ fontSize: '12.5px', fontFamily: FONT.mono, color: theme.text, fontWeight: 600, flexShrink: 0 }}>
+        {item.name}
+      </span>
+      <span style={{
+        flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        fontSize: '11.5px', fontFamily: FONT.mono, color: theme.textFaint, textAlign: 'right',
+      }}>
+        {item.path}:{item.line}
+      </span>
+    </button>
+  );
+}
+
+export default function CodeHealthView({ activeTheme: theme, issuesReport, depReport, onNavigateToFile, onRefresh, resetKey }) {
   const [tab, setTab] = useState('code');
   const [severityFilter, setSeverityFilter] = useState(null);
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [search, setSearch] = useState('');
+  const [hotspots, setHotspots] = useState(null);
+  const [hotspotsLoading, setHotspotsLoading] = useState(false);
+  const [deadCode, setDeadCode] = useState(null);
+  const [deadCodeLoading, setDeadCodeLoading] = useState(false);
 
   const summary = issuesReport?.summary || {};
   const totalFindings = issuesReport?.total_findings ?? 0;
@@ -217,6 +291,39 @@ export default function CodeHealthView({ activeTheme: theme, issuesReport, depRe
   }, [issuesReport, severityFilter, categoryFilter, search]);
 
   const hasRepo = totalFiles > 0;
+
+  useEffect(() => {
+    setHotspots(null);
+    setDeadCode(null);
+  }, [resetKey]);
+
+  useEffect(() => {
+    if (tab !== 'hotspots' || hotspots !== null || !hasRepo) return;
+    setHotspotsLoading(true);
+    apiFetch('/hotspots')
+      .then((res) => res.json())
+      .then((data) => setHotspots(data.hotspots || []))
+      .catch((err) => {
+        console.error('Failed to load hotspots:', err);
+        setHotspots([]);
+      })
+      .finally(() => setHotspotsLoading(false));
+  }, [tab, hotspots, hasRepo]);
+
+  useEffect(() => {
+    if (tab !== 'deadcode' || deadCode !== null || !hasRepo) return;
+    setDeadCodeLoading(true);
+    apiFetch('/dead-code')
+      .then((res) => res.json())
+      .then((data) => setDeadCode(data))
+      .catch((err) => {
+        console.error('Failed to load dead code report:', err);
+        setDeadCode({ dead_code: [], limitation: null });
+      })
+      .finally(() => setDeadCodeLoading(false));
+  }, [tab, deadCode, hasRepo]);
+
+  const maxChurn = hotspots?.length ? Math.max(...hotspots.map((h) => h.churn)) : 0;
 
   return (
     <div style={{
@@ -278,6 +385,8 @@ export default function CodeHealthView({ activeTheme: theme, issuesReport, depRe
               {[
                 { key: 'code', label: `Code Findings (${totalFindings})` },
                 { key: 'deps', label: `Dependencies (${depReport?.vulnerable_count ?? 0} vulnerable)` },
+                { key: 'hotspots', label: 'Hotspots' },
+                { key: 'deadcode', label: 'Dead Code' },
               ].map((t) => (
                 <button
                   key={t.key}
@@ -371,6 +480,63 @@ export default function CodeHealthView({ activeTheme: theme, issuesReport, depRe
                     <span style={labelStyle(theme)}>All dependencies</span>
                     <div style={{ marginTop: '8px' }}>
                       {otherDeps.map((d, i) => <DependencyCard key={i} theme={theme} dep={d} />)}
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+
+            {tab === 'hotspots' && (
+              <>
+                <p style={{ fontSize: '11.5px', color: theme.textFaint, marginBottom: '14px' }}>
+                  Files with the most commits in the last 90 days — frequently-changed code is worth extra review attention.
+                </p>
+                {hotspotsLoading ? (
+                  <LoadingRow theme={theme} label="Computing commit hotspots…" />
+                ) : !hotspots || hotspots.length === 0 ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: theme.textMuted, fontSize: '12.5px', padding: '20px 4px' }}>
+                    <Flame size={16} />
+                    No commit history found for this repository.
+                  </div>
+                ) : (
+                  <div>
+                    {hotspots.map((h) => (
+                      <HotspotRow key={h.path} theme={theme} hotspot={h} maxChurn={maxChurn} onNavigateToFile={onNavigateToFile} />
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            {tab === 'deadcode' && (
+              <>
+                <div style={{
+                  display: 'flex', gap: '8px', padding: '10px 12px', marginBottom: '16px',
+                  borderRadius: '8px', background: theme.surfaceAlt, border: `1px solid ${theme.border}`,
+                }}>
+                  <Info size={14} color={theme.textMuted} style={{ flexShrink: 0, marginTop: '1px' }} />
+                  <span style={{ fontSize: '11.5px', color: theme.textMuted, lineHeight: 1.5 }}>
+                    {deadCode?.limitation
+                      || 'Heuristic, not a guarantee: dynamic calls and calls through a variable of unknown type can\'t be traced by static analysis, and only Python is analyzed today.'}
+                  </span>
+                </div>
+
+                {deadCodeLoading ? (
+                  <LoadingRow theme={theme} label="Analyzing call graph for dead code…" />
+                ) : !deadCode?.dead_code?.length ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: theme.textMuted, fontSize: '12.5px', padding: '20px 4px' }}>
+                    <Trash2 size={16} />
+                    No unreferenced functions or classes found.
+                  </div>
+                ) : (
+                  <>
+                    <p style={{ fontSize: '11.5px', color: theme.textFaint, marginBottom: '10px' }}>
+                      {deadCode.total_dead} candidate{deadCode.total_dead === 1 ? '' : 's'} across {deadCode.python_files_analyzed} Python file{deadCode.python_files_analyzed === 1 ? '' : 's'}
+                    </p>
+                    <div>
+                      {deadCode.dead_code.map((item, i) => (
+                        <DeadCodeRow key={`${item.path}:${item.name}:${i}`} theme={theme} item={item} onNavigateToFile={onNavigateToFile} />
+                      ))}
                     </div>
                   </>
                 )}

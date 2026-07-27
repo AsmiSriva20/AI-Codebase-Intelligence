@@ -11,8 +11,8 @@ body,
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
-    sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -41,12 +41,12 @@ input {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(140, 149, 159, 0.4);
+  background: rgba(113, 113, 122, 0.35);
   border-radius: 8px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(140, 149, 159, 0.6);
+  background: rgba(113, 113, 122, 0.55);
 }
 
 /*
@@ -55,16 +55,16 @@ input {
  * These overrides re-theme that chrome to match the app's active palette.
  */
 .rf-canvas[data-rf-theme='dark'] {
-  --rfc-bg: #161b22;
-  --rfc-border: #30363d;
-  --rfc-hover: #21262d;
-  --rfc-icon: #c9d1d9;
+  --rfc-bg: #18181b;
+  --rfc-border: #27272a;
+  --rfc-hover: #232326;
+  --rfc-icon: #d4d4d8;
 }
 .rf-canvas[data-rf-theme='light'] {
   --rfc-bg: #ffffff;
-  --rfc-border: #d0d7de;
-  --rfc-hover: #f3f4f6;
-  --rfc-icon: #1f2328;
+  --rfc-border: #e4e4e7;
+  --rfc-hover: #f4f4f5;
+  --rfc-icon: #18181b;
 }
 
 .rf-canvas .react-flow__controls {
@@ -104,4 +104,21 @@ input {
 }
 .rf-canvas .react-flow__node {
   transition: opacity 0.2s ease;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

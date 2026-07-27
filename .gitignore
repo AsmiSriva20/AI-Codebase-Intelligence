@@ -18,4 +18,8 @@ logs/
 
 backend/repos/
 
+# Obsolete — replaced by Qdrant, see docs/full-platform-spec.md §2
+backend/chroma_db/
+docs/
 .env
+
