@@ -3,7 +3,7 @@ import shutil
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
-from git import Repo
+from git import Repo, GitCommandError
 
 from app import state
 from app.schemas import CloneRequest, SwitchBranchRequest
@@ -38,7 +38,7 @@ async def clone_repository(payload: CloneRequest):
         raise HTTPException(status_code=400, detail="Repository URL cannot be empty.")
 
     # A fresh clone invalidates everything derived from the previous one.
-    state.REPOSITORY_DATA = []
+    state.FILES_INDEXED_COUNT = 0
     state.EMBEDDED_CHUNKS_COUNT = 0
     state.EMBEDDING_DIMENSION = 0
     state.INDEX = None
@@ -67,7 +67,20 @@ async def clone_repository(payload: CloneRequest):
         try:
             # No depth limit: branch tracking needs every branch's ref, and git
             # history intelligence needs full commit history, not just the tip.
-            Repo.clone_from(repo_url, state.REPO_PATH)
+            # --filter=blob:none keeps that full history but defers downloading
+            # file *content* until something needs it — checkout of the default
+            # branch still pulls everything it needs, so scanning/parsing right
+            # after clone works exactly the same; it just skips pulling every
+            # historical blob upfront too, which is the main memory/disk cost
+            # for repos with deep history or large files. Not every git host
+            # supports partial clone, so fall back to a plain full clone if the
+            # server rejects the filter.
+            try:
+                Repo.clone_from(repo_url, state.REPO_PATH, multi_options=["--filter=blob:none"])
+            except GitCommandError:
+                if os.path.exists(state.REPO_PATH):
+                    shutil.rmtree(state.REPO_PATH, onexc=state.clear_readonly_and_retry)
+                Repo.clone_from(repo_url, state.REPO_PATH)
         except Exception as e:
             repository.status = "failed"
             repository.error_message = str(e)
@@ -139,7 +152,7 @@ def build_repository():
     return {
         "message": "Repository indexed successfully",
         "chunks": state.EMBEDDED_CHUNKS_COUNT,
-        "files_indexed": len(state.REPOSITORY_DATA),
+        "files_indexed": state.FILES_INDEXED_COUNT,
     }
 
 
@@ -177,5 +190,5 @@ def switch_branch(request: SwitchBranchRequest):
         "message": f"Switched to branch '{request.name}'",
         "branch": request.name,
         "chunks": state.EMBEDDED_CHUNKS_COUNT,
-        "files_indexed": len(state.REPOSITORY_DATA),
+        "files_indexed": state.FILES_INDEXED_COUNT,
     }

@@ -71,6 +71,13 @@ EMBEDDING_MODEL_NAME = os.environ.get("EMBEDDING_MODEL_NAME") or None
 SPARSE_EMBEDDING_MODEL_NAME = os.environ.get("SPARSE_EMBEDDING_MODEL_NAME", "Qdrant/bm25")
 EMBEDDING_BATCH_SIZE = _env_int("EMBEDDING_BATCH_SIZE", 32)
 
+# --- Build pipeline ---
+# How many parsed files accumulate in memory before being flushed to Postgres.
+# The build streams file-by-file (parse -> index -> chunk -> embed -> persist)
+# specifically to keep peak memory bounded on small hosts — this caps how big
+# that "in flight" buffer is allowed to get, independent of total repo size.
+FILE_PERSIST_BATCH_SIZE = _env_int("FILE_PERSIST_BATCH_SIZE", 100)
+
 # --- Chunking (controls embedding cost/granularity per file) ---
 CHUNK_WINDOW_LINES = _env_int("CHUNK_WINDOW_LINES", 40)
 CHUNK_MAX_TEXT_CHUNKS_PER_FILE = _env_int("CHUNK_MAX_TEXT_CHUNKS_PER_FILE", 12)

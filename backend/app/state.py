@@ -11,16 +11,19 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 from git import Repo
 
-from app.config import REPO_PATH, BINARY_SKIP_EXTENSIONS, MAX_INDEXABLE_FILE_SIZE
+from app.config import (
+    REPO_PATH, BINARY_SKIP_EXTENSIONS, MAX_INDEXABLE_FILE_SIZE, FILE_PERSIST_BATCH_SIZE,
+    LLM_SUMMARY_MAX_FILES, EMBEDDING_BATCH_SIZE,
+)
 from app.storage.db import get_session
 from app.storage.models import Repository, Branch, File as FileRow, Report
 from app.storage.vectordb import store_embeddings
 from app import parsers
 from app.parsers.base import empty_analysis
 from app.analysis.scanner import scan_repository
-from app.analysis.indexer import build_index
-from app.analysis.chunker import chunk_repository
-from app.storage.embeddings import embed_chunks_in_batches
+from app.analysis.indexer import empty_index, index_file
+from app.analysis.chunker import chunk_file
+from app.storage.embeddings import embed_batch
 from app.analysis.callgraph import build_call_graph
 
 LANGUAGE_PARSERS = parsers.build_registry()
@@ -29,7 +32,7 @@ TEXT_EXTENSIONS = {
     ".env.example", ".xml", ".html", ".css",
 }
 
-REPOSITORY_DATA = []
+FILES_INDEXED_COUNT = 0
 EMBEDDED_CHUNKS_COUNT = 0
 EMBEDDING_DIMENSION = 0
 INDEX = None
@@ -48,31 +51,79 @@ CURRENT_REPOSITORY_ID = None
 CURRENT_BRANCH_ID = None
 
 
-def get_file_analysis(full_path, relative_path):
-    """Reuse the parse already done during /build (REPOSITORY_DATA) instead of
-    re-opening and re-parsing the file from disk — used by /file-info and
-    /dependencies. Falls back to a fresh parse if the file isn't in the
-    current index (e.g. skipped as binary/oversized, or no build has run yet)."""
-    for entry in REPOSITORY_DATA:
-        if entry["path"] == relative_path:
-            return entry["analysis"]
-
-    parser_module = LANGUAGE_PARSERS.get(os.path.splitext(full_path)[1].lower())
-    if parser_module is None:
-        return None
+def parse_file(full_path):
+    """Parse a single file on disk into its `analysis` dict, or None if it
+    isn't indexable (binary, oversized, or no parser/text handling applies).
+    The one place that decides "is this file indexable, and how" — shared by
+    the streaming build (analyze_repository), on-demand single-file lookups
+    (get_file_analysis), and the /summary sample, so none of them need the
+    whole repo's parsed output cached in RAM to work."""
+    ext = os.path.splitext(full_path)[1].lower()
     try:
-        return parser_module.analyze_file(full_path)
+        size = os.path.getsize(full_path)
     except OSError:
         return None
 
+    if ext in BINARY_SKIP_EXTENSIONS or size > MAX_INDEXABLE_FILE_SIZE:
+        return None
+
+    parser_module = LANGUAGE_PARSERS.get(ext)
+    if parser_module is not None:
+        try:
+            return parser_module.analyze_file(full_path)
+        except Exception:
+            return None
+
+    if ext in TEXT_EXTENSIONS or ext == "":
+        try:
+            with open(full_path, "rb") as f:
+                raw_bytes = f.read()
+        except OSError:
+            return None
+        if b"\x00" in raw_bytes:
+            # Binary content masquerading as text (e.g. a model weight
+            # shard with no extension) — not indexable, and a literal NUL
+            # byte would fail the Postgres JSONB insert when persisted.
+            return None
+        result = empty_analysis()
+        result["raw_text"] = raw_bytes.decode("utf-8", errors="ignore")
+        return result
+
+    return None
+
+
+def get_file_analysis(full_path):
+    """Used by /file-info and /dependencies for a single file's analysis."""
+    return parse_file(full_path)
+
+
+def sample_repository_files(max_files=LLM_SUMMARY_MAX_FILES):
+    """Parse just the first `max_files` indexable files on disk, in scan
+    order. Used by /summary, which only ever looks at a small prefix of the
+    repo — no need to hold every file's analysis in RAM just for that."""
+    sample = []
+    for file in scan_repository(REPO_PATH):
+        if len(sample) >= max_files:
+            break
+        analysis = parse_file(file["full_path"])
+        if analysis is None:
+            continue
+        sample.append({"path": file["path"], "analysis": analysis})
+    return sample
+
 
 def rehydrate_from_db():
-    """Warm the in-process caches above from Postgres on startup. REPOSITORY_DATA,
-    INDEX and the *_REPORT globals are all reconstructible from data Postgres
-    already durably holds (files.analysis, reports.*) — without this, a process
+    """Warm the in-process caches above from Postgres on startup. INDEX and the
+    *_REPORT globals are all reconstructible from data Postgres already
+    durably holds (files.analysis, reports.*) — without this, a process
     restart would silently forget the most recently built repo/branch and force
-    a full rebuild even though nothing was actually lost."""
-    global CURRENT_REPOSITORY_ID, CURRENT_BRANCH_ID, REPOSITORY_DATA, INDEX
+    a full rebuild even though nothing was actually lost.
+
+    Streams FileRows in pages (yield_per) rather than loading the whole
+    branch's files at once — same reasoning as the streaming build itself:
+    files.analysis carries full function source text per file, and a big
+    branch loaded as one `.all()` would spike memory right at startup."""
+    global CURRENT_REPOSITORY_ID, CURRENT_BRANCH_ID, FILES_INDEXED_COUNT, INDEX
     global ISSUES_REPORT, DEPENDENCY_REPORT, ARCHITECTURE_REPORT, CALL_GRAPH_REPORT
     global DEAD_CODE_REPORT, HOTSPOTS_REPORT
 
@@ -99,10 +150,16 @@ def rehydrate_from_db():
         CURRENT_REPOSITORY_ID = repository.id
         CURRENT_BRANCH_ID = branch.id
 
-        files = session.query(FileRow).filter(FileRow.branch_id == branch.id).all()
-        REPOSITORY_DATA = [{"path": f.path, "analysis": f.analysis} for f in files]
-        if REPOSITORY_DATA:
-            INDEX = build_index(REPOSITORY_DATA)
+        index = empty_index()
+        files_indexed = 0
+        rows = session.query(FileRow).filter(FileRow.branch_id == branch.id).yield_per(FILE_PERSIST_BATCH_SIZE)
+        for row in rows:
+            index_file(index, row.path, row.analysis)
+            files_indexed += 1
+
+        FILES_INDEXED_COUNT = files_indexed
+        if files_indexed:
+            INDEX = index
 
         report = session.get(Report, branch.id)
         if report is not None:
@@ -139,61 +196,79 @@ def clear_readonly_and_retry(func, path, exc):
 
 
 def analyze_repository(repo_path, branch_id):
-
-    repository_data = []
+    """Scan, parse, index, chunk, embed and persist the repo one file at a
+    time, instead of building a full-repo in-memory list (every function's
+    source text, every text file's raw content) before any of that starts.
+    That full-list approach is what was exceeding the 512MB host limit during
+    clone+parse — a big repo's parsed output easily runs into hundreds of MB
+    held all at once, on top of whatever git itself is using. Here, at most
+    one file's parsed analysis plus one FILE_PERSIST_BATCH_SIZE-sized batch of
+    pending DB rows and one EMBEDDING_BATCH_SIZE-sized batch of pending chunks
+    are ever alive at the same time, regardless of repo size."""
     files = scan_repository(repo_path)
+    index = empty_index()
+    counters = {"files_indexed": 0}
 
-    for file in files:
-        ext = file["extension"].lower()
+    session = get_session()
+    try:
+        session.query(FileRow).filter(FileRow.branch_id == branch_id).delete()
 
-        if ext in BINARY_SKIP_EXTENSIONS or file["size"] > MAX_INDEXABLE_FILE_SIZE:
-            continue
+        def stream_embedding_batches():
+            chunk_buffer = []
+            row_buffer = []
 
-        parser_module = LANGUAGE_PARSERS.get(ext)
+            def flush_rows():
+                # flush (not commit) sends the INSERTs to Postgres and lets
+                # SQLAlchemy release its references to `row_buffer`'s objects,
+                # without ending the transaction — so the whole build's
+                # delete-old-rows + insert-new-rows still lands atomically at
+                # the final commit below, exactly like the old single-shot
+                # persist_files did, while still keeping peak memory bounded.
+                if row_buffer:
+                    session.bulk_save_objects(row_buffer)
+                    session.flush()
+                    row_buffer.clear()
 
-        if parser_module is not None:
-            try:
-                result = parser_module.analyze_file(file["full_path"])
-            except Exception:
-                continue
+            for file in files:
+                analysis = parse_file(file["full_path"])
+                if analysis is None:
+                    continue
 
-        elif ext in TEXT_EXTENSIONS or ext == "":
-            try:
-                with open(file["full_path"], "rb") as f:
-                    raw_bytes = f.read()
-            except OSError:
-                continue
-            if b"\x00" in raw_bytes:
-                # Binary content masquerading as text (e.g. a model weight
-                # shard with no extension) — not indexable, and a literal NUL
-                # byte would fail the Postgres JSONB insert in persist_files.
-                continue
-            result = empty_analysis()
-            result["raw_text"] = raw_bytes.decode("utf-8", errors="ignore")
+                path = file["path"]
+                index_file(index, path, analysis)
+                chunk_buffer.extend(chunk_file(path, analysis))
+                row_buffer.append(FileRow(
+                    branch_id=branch_id,
+                    path=path,
+                    extension=os.path.splitext(path)[1],
+                    analysis=_strip_nul_bytes(analysis),
+                ))
+                counters["files_indexed"] += 1
 
-        else:
-            continue
+                while len(chunk_buffer) >= EMBEDDING_BATCH_SIZE:
+                    batch = chunk_buffer[:EMBEDDING_BATCH_SIZE]
+                    del chunk_buffer[:EMBEDDING_BATCH_SIZE]
+                    yield embed_batch(batch)
 
-        repository_data.append({
-            "path": file["path"],
-            "analysis": result,
-        })
+                if len(row_buffer) >= FILE_PERSIST_BATCH_SIZE:
+                    flush_rows()
 
-    global REPOSITORY_DATA
-    REPOSITORY_DATA = repository_data
+            if chunk_buffer:
+                yield embed_batch(chunk_buffer)
+            flush_rows()
 
-    index = build_index(repository_data)
+        global EMBEDDED_CHUNKS_COUNT, EMBEDDING_DIMENSION
+        EMBEDDED_CHUNKS_COUNT, EMBEDDING_DIMENSION = store_embeddings(
+            stream_embedding_batches(), branch_id=branch_id
+        )
+        session.commit()
+    finally:
+        session.close()
 
-    chunks = chunk_repository(repository_data)
+    global FILES_INDEXED_COUNT
+    FILES_INDEXED_COUNT = counters["files_indexed"]
 
-    global EMBEDDED_CHUNKS_COUNT, EMBEDDING_DIMENSION
-    EMBEDDED_CHUNKS_COUNT, EMBEDDING_DIMENSION = store_embeddings(
-        embed_chunks_in_batches(chunks), branch_id=branch_id
-    )
-
-    print("Chunks:", EMBEDDED_CHUNKS_COUNT)
-
-    persist_files(branch_id, repository_data)
+    print("Chunks:", EMBEDDED_CHUNKS_COUNT, "Files:", FILES_INDEXED_COUNT)
 
     return index
 
@@ -211,25 +286,6 @@ def _strip_nul_bytes(value):
     if isinstance(value, list):
         return [_strip_nul_bytes(v) for v in value]
     return value
-
-
-def persist_files(branch_id, repository_data):
-    """Upsert this build's files into Postgres, replacing whatever the branch had before."""
-    session = get_session()
-    try:
-        session.query(FileRow).filter(FileRow.branch_id == branch_id).delete()
-        session.bulk_save_objects([
-            FileRow(
-                branch_id=branch_id,
-                path=item["path"],
-                extension=os.path.splitext(item["path"])[1],
-                analysis=_strip_nul_bytes(item["analysis"]),
-            )
-            for item in repository_data
-        ])
-        session.commit()
-    finally:
-        session.close()
 
 
 def list_git_branches(repo_path):

@@ -1,6 +1,6 @@
 from fastembed import TextEmbedding, SparseTextEmbedding
 
-from app.config import EMBEDDING_MODEL_NAME, SPARSE_EMBEDDING_MODEL_NAME, EMBEDDING_BATCH_SIZE
+from app.config import EMBEDDING_MODEL_NAME, SPARSE_EMBEDDING_MODEL_NAME
 
 model = TextEmbedding(model_name=EMBEDDING_MODEL_NAME) if EMBEDDING_MODEL_NAME else TextEmbedding()
 sparse_model = SparseTextEmbedding(model_name=SPARSE_EMBEDDING_MODEL_NAME)
@@ -15,25 +15,21 @@ def create_sparse_embedding(text):
     return {"indices": result.indices.tolist(), "values": result.values.tolist()}
 
 
-def embed_chunks_in_batches(chunks, batch_size=EMBEDDING_BATCH_SIZE):
-    """Embed `chunks` and yield one embedded batch at a time instead of
-    building the whole repo's dense+sparse vectors as a single in-memory list.
-    A large repo can produce tens of thousands of chunks — holding all of their
-    embeddings (plus a second copy for the Qdrant payload) at once is what was
-    exceeding Render's 512MB limit, not the ONNX inference itself (which was
-    already internally batched)."""
-    for start in range(0, len(chunks), batch_size):
-        batch = chunks[start:start + batch_size]
-        texts = [chunk["text"] for chunk in batch]
-        vectors = list(model.embed(texts, batch_size=batch_size))
-        sparse_vectors = list(sparse_model.embed(texts, batch_size=batch_size))
+def embed_batch(batch):
+    """Embed exactly one batch of chunks and return the embedded list. Kept
+    separate from batching/looping logic so a streaming caller can build up
+    one file at a time's worth of chunks and embed+flush as soon as a batch
+    is full, instead of ever holding the whole repo's chunks in memory."""
+    texts = [chunk["text"] for chunk in batch]
+    vectors = list(model.embed(texts, batch_size=len(texts)))
+    sparse_vectors = list(sparse_model.embed(texts, batch_size=len(texts)))
 
-        yield [
-            {
-                "text": chunk["text"],
-                "metadata": chunk["metadata"],
-                "embedding": vector.tolist(),
-                "sparse_embedding": {"indices": sparse.indices.tolist(), "values": sparse.values.tolist()},
-            }
-            for chunk, vector, sparse in zip(batch, vectors, sparse_vectors)
-        ]
+    return [
+        {
+            "text": chunk["text"],
+            "metadata": chunk["metadata"],
+            "embedding": vector.tolist(),
+            "sparse_embedding": {"indices": sparse.indices.tolist(), "values": sparse.values.tolist()},
+        }
+        for chunk, vector, sparse in zip(batch, vectors, sparse_vectors)
+    ]

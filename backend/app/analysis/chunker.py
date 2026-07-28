@@ -29,43 +29,40 @@ def _chunk_raw_text(text, path):
     return chunks
 
 
-def chunk_repository(repository_data):
+def chunk_file(path, analysis):
+    """Chunk one file's parsed analysis — called per-file by the streaming
+    build so it never needs every file's analysis held in memory at once."""
     chunks = []
 
-    for file_data in repository_data:
+    # Function chunks
+    for function in analysis["functions"]:
 
-        path = file_data["path"]
-        analysis = file_data["analysis"]
+        chunks.append({
+            "text": function["code"][:MAX_CHUNK_CHARS],
+            "metadata": {
+                "type": "function",
+                "name": function["name"],
+                "path": path,
+            },
+        })
 
-        # Function chunks
-        for function in analysis["functions"]:
+    # Class chunks
+    for cls in analysis["classes"]:
 
-            chunks.append({
-                "text": function["code"][:MAX_CHUNK_CHARS],
-                "metadata": {
-                    "type": "function",
-                    "name": function["name"],
-                    "path": path,
-                },
-            })
+        chunks.append({
+            "text": f"Class: {cls}",
+            "metadata": {
+                "type": "class",
+                "name": cls,
+                "path": path,
+            },
+        })
 
-        # Class chunks
-        for cls in analysis["classes"]:
-
-            chunks.append({
-                "text": f"Class: {cls}",
-                "metadata": {
-                    "type": "class",
-                    "name": cls,
-                    "path": path,
-                },
-            })
-
-        # Plain-text chunks (README, configs, docs, anything without code
-        # structure) so semantic search / chat can answer questions that
-        # aren't about a specific function or class.
-        raw_text = analysis.get("raw_text")
-        if raw_text and not analysis["functions"] and not analysis["classes"]:
-            chunks.extend(_chunk_raw_text(raw_text, path))
+    # Plain-text chunks (README, configs, docs, anything without code
+    # structure) so semantic search / chat can answer questions that
+    # aren't about a specific function or class.
+    raw_text = analysis.get("raw_text")
+    if raw_text and not analysis["functions"] and not analysis["classes"]:
+        chunks.extend(_chunk_raw_text(raw_text, path))
 
     return chunks

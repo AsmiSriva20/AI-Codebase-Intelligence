@@ -19,7 +19,7 @@ def get_file_info(full_path, relative_path):
             "unsupported": True,
         }
 
-    analysis = state.get_file_analysis(full_path, relative_path)
+    analysis = state.get_file_analysis(full_path)
     if analysis is None:
         return None
 

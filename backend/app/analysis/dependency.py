@@ -10,7 +10,7 @@ def get_dependencies(path):
         return []
 
     full_path = os.path.join(state.REPO_PATH, path)
-    analysis = state.get_file_analysis(full_path, path)
+    analysis = state.get_file_analysis(full_path)
     if analysis is None:
         return []
 

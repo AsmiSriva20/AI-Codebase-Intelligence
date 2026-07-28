@@ -61,11 +61,11 @@ def dead_code(branch: str | None = None):
 
 @router.get("/summary")
 def repository_summary():
-    if not state.REPOSITORY_DATA:
+    if not state.FILES_INDEXED_COUNT:
         raise HTTPException(status_code=400, detail="No repository indexed yet. Import & build a repository first.")
 
     try:
-        summary = summarize_repository(state.REPOSITORY_DATA)
+        summary = summarize_repository(state.sample_repository_files())
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM request failed: {e}")
 
