@@ -15,20 +15,25 @@ def create_sparse_embedding(text):
     return {"indices": result.indices.tolist(), "values": result.values.tolist()}
 
 
-def embed_chunks(chunks):
-    if not chunks:
-        return []
+def embed_chunks_in_batches(chunks, batch_size=EMBEDDING_BATCH_SIZE):
+    """Embed `chunks` and yield one embedded batch at a time instead of
+    building the whole repo's dense+sparse vectors as a single in-memory list.
+    A large repo can produce tens of thousands of chunks — holding all of their
+    embeddings (plus a second copy for the Qdrant payload) at once is what was
+    exceeding Render's 512MB limit, not the ONNX inference itself (which was
+    already internally batched)."""
+    for start in range(0, len(chunks), batch_size):
+        batch = chunks[start:start + batch_size]
+        texts = [chunk["text"] for chunk in batch]
+        vectors = list(model.embed(texts, batch_size=batch_size))
+        sparse_vectors = list(sparse_model.embed(texts, batch_size=batch_size))
 
-    texts = [chunk["text"] for chunk in chunks]
-    vectors = model.embed(texts, batch_size=EMBEDDING_BATCH_SIZE)  # batched, but bounded to keep memory use predictable
-    sparse_vectors = sparse_model.embed(texts, batch_size=EMBEDDING_BATCH_SIZE)
-
-    return [
-        {
-            "text": chunk["text"],
-            "metadata": chunk["metadata"],
-            "embedding": vector.tolist(),
-            "sparse_embedding": {"indices": sparse.indices.tolist(), "values": sparse.values.tolist()},
-        }
-        for chunk, vector, sparse in zip(chunks, vectors, sparse_vectors)
-    ]
+        yield [
+            {
+                "text": chunk["text"],
+                "metadata": chunk["metadata"],
+                "embedding": vector.tolist(),
+                "sparse_embedding": {"indices": sparse.indices.tolist(), "values": sparse.values.tolist()},
+            }
+            for chunk, vector, sparse in zip(batch, vectors, sparse_vectors)
+        ]

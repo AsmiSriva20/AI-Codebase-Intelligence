@@ -75,40 +75,57 @@ def _upsert_with_retry(points):
             time.sleep(2 * attempt)  # 2s, then 4s
 
 
-def store_embeddings(chunks, branch_id=DEFAULT_BRANCH_ID):
+def store_embeddings(batches, branch_id=DEFAULT_BRANCH_ID):
     """
-    Store embedded chunks in Qdrant, scoped to branch_id. Each point carries both
-    a dense vector (semantic similarity) and a sparse BM25-style vector (keyword
-    match) so hybrid_search can fuse the two.
+    Store embedded chunks in Qdrant, scoped to branch_id. `batches` is an
+    iterable of embedded-chunk lists (e.g. embed_chunks_in_batches) — each
+    batch is converted and upserted as it arrives and then dropped, so peak
+    memory is bounded by one batch instead of the whole repo's embeddings.
+    Each point carries both a dense vector (semantic similarity) and a sparse
+    BM25-style vector (keyword match) so hybrid_search can fuse the two.
+
+    Returns (total_chunks_stored, embedding_dimension) so callers can report
+    stats without needing to keep the embedded chunks around themselves.
     """
     clear_branch(branch_id)
 
-    if not chunks:
-        return
+    total = 0
+    dimension = 0
+    for batch in batches:
+        if not batch:
+            continue
 
-    points = [
-        PointStruct(
-            # Qdrant point IDs must be an unsigned int or a UUID — a plain
-            # "{branch_id}:{i}" string is rejected, and bare sequential ints
-            # would collide across branches (IDs are unique per-collection,
-            # not per-filter). Hash (branch_id, i) into a stable UUID instead.
-            id=str(uuid.uuid5(uuid.NAMESPACE_OID, f"{branch_id}:{i}")),
-            vector={
-                DENSE_VECTOR_NAME: chunk["embedding"],
-                SPARSE_VECTOR_NAME: SparseVector(**chunk["sparse_embedding"]),
-            },
-            payload={"branch_id": branch_id, "text": chunk["text"], **chunk["metadata"]},
-        )
-        for i, chunk in enumerate(chunks)
-    ]
+        points = [
+            PointStruct(
+                # Qdrant point IDs must be an unsigned int or a UUID — a plain
+                # "{branch_id}:{i}" string is rejected, and bare sequential ints
+                # would collide across branches (IDs are unique per-collection,
+                # not per-filter). Hash (branch_id, i) into a stable UUID instead.
+                id=str(uuid.uuid5(uuid.NAMESPACE_OID, f"{branch_id}:{total + i}")),
+                vector={
+                    DENSE_VECTOR_NAME: chunk["embedding"],
+                    SPARSE_VECTOR_NAME: SparseVector(**chunk["sparse_embedding"]),
+                },
+                payload={"branch_id": branch_id, "text": chunk["text"], **chunk["metadata"]},
+            )
+            for i, chunk in enumerate(batch)
+        ]
 
-    # One big upsert for a large repo was the request that kept timing out —
-    # batching keeps each individual HTTP request small, and retrying absorbs
-    # any single transient failure instead of failing the whole build over it.
-    for start in range(0, len(points), UPSERT_BATCH_SIZE):
-        _upsert_with_retry(points[start:start + UPSERT_BATCH_SIZE])
+        # Sub-batch again on the way to Qdrant — an embedding batch may still
+        # be bigger than what's safe in a single upsert HTTP request — and
+        # retrying absorbs any single transient failure instead of failing the
+        # whole build over it.
+        for start in range(0, len(points), UPSERT_BATCH_SIZE):
+            _upsert_with_retry(points[start:start + UPSERT_BATCH_SIZE])
 
-    print("Stored embeddings:", collection_size(branch_id))
+        if dimension == 0:
+            dimension = len(batch[0]["embedding"])
+        total += len(batch)
+
+    if total:
+        print("Stored embeddings:", collection_size(branch_id))
+
+    return total, dimension
 
 
 def collection_size(branch_id=DEFAULT_BRANCH_ID):

@@ -20,7 +20,7 @@ from app.parsers.base import empty_analysis
 from app.analysis.scanner import scan_repository
 from app.analysis.indexer import build_index
 from app.analysis.chunker import chunk_repository
-from app.storage.embeddings import embed_chunks
+from app.storage.embeddings import embed_chunks_in_batches
 from app.analysis.callgraph import build_call_graph
 
 LANGUAGE_PARSERS = parsers.build_registry()
@@ -30,7 +30,8 @@ TEXT_EXTENSIONS = {
 }
 
 REPOSITORY_DATA = []
-EMBEDDED_CHUNKS = []
+EMBEDDED_CHUNKS_COUNT = 0
+EMBEDDING_DIMENSION = 0
 INDEX = None
 ISSUES_REPORT = None
 DEPENDENCY_REPORT = None
@@ -185,12 +186,12 @@ def analyze_repository(repo_path, branch_id):
 
     chunks = chunk_repository(repository_data)
 
-    global EMBEDDED_CHUNKS
-    EMBEDDED_CHUNKS = embed_chunks(chunks)
+    global EMBEDDED_CHUNKS_COUNT, EMBEDDING_DIMENSION
+    EMBEDDED_CHUNKS_COUNT, EMBEDDING_DIMENSION = store_embeddings(
+        embed_chunks_in_batches(chunks), branch_id=branch_id
+    )
 
-    store_embeddings(EMBEDDED_CHUNKS, branch_id=branch_id)
-
-    print("Chunks:", len(EMBEDDED_CHUNKS))
+    print("Chunks:", EMBEDDED_CHUNKS_COUNT)
 
     persist_files(branch_id, repository_data)
 

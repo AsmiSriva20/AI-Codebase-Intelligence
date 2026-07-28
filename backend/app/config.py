@@ -13,6 +13,7 @@ storage/db.py) so that importing this module never fails just because an
 unrelated service's credentials aren't configured yet.
 """
 import os
+import tempfile
 
 
 def _env_int(name, default):
@@ -31,7 +32,13 @@ def _env_list(name, default):
 
 
 # --- Repository checkout ---
-REPOS_DIR = os.environ.get("REPOS_DIR", "repos")
+# Ephemeral scratch space for whatever repo is currently cloned. Defaults to
+# the OS temp dir rather than a path relative to the app's working directory:
+# most cloud hosts (Render, Railway, Heroku, Fly, containers running as a
+# non-root user) run the app from a read-only or otherwise non-writable
+# project directory and only guarantee a writable temp dir. Override REPOS_DIR
+# if you mount a persistent volume instead.
+REPOS_DIR = os.environ.get("REPOS_DIR", os.path.join(tempfile.gettempdir(), "aci-repos"))
 REPO_PATH = os.path.join(REPOS_DIR, "repository")
 
 # --- File scanning / indexing limits ---

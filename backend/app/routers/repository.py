@@ -39,7 +39,8 @@ async def clone_repository(payload: CloneRequest):
 
     # A fresh clone invalidates everything derived from the previous one.
     state.REPOSITORY_DATA = []
-    state.EMBEDDED_CHUNKS = []
+    state.EMBEDDED_CHUNKS_COUNT = 0
+    state.EMBEDDING_DIMENSION = 0
     state.INDEX = None
     state.reset_report_caches()
     state.CURRENT_REPOSITORY_ID = None
@@ -55,7 +56,7 @@ async def clone_repository(payload: CloneRequest):
                 detail=f"Could not clear previous repository before cloning: {e}",
             )
 
-    os.makedirs("repos", exist_ok=True)
+    os.makedirs(os.path.dirname(state.REPO_PATH), exist_ok=True)
 
     session = get_session()
     try:
@@ -105,8 +106,8 @@ def scan():
 @router.get("/analyze")
 def analyze():
     return {
-        "chunks_created": len(state.EMBEDDED_CHUNKS),
-        "embedding_dimension": len(state.EMBEDDED_CHUNKS[0]["embedding"]) if state.EMBEDDED_CHUNKS else 0,
+        "chunks_created": state.EMBEDDED_CHUNKS_COUNT,
+        "embedding_dimension": state.EMBEDDING_DIMENSION,
     }
 
 
@@ -137,7 +138,7 @@ def build_repository():
 
     return {
         "message": "Repository indexed successfully",
-        "chunks": len(state.EMBEDDED_CHUNKS),
+        "chunks": state.EMBEDDED_CHUNKS_COUNT,
         "files_indexed": len(state.REPOSITORY_DATA),
     }
 
@@ -175,6 +176,6 @@ def switch_branch(request: SwitchBranchRequest):
     return {
         "message": f"Switched to branch '{request.name}'",
         "branch": request.name,
-        "chunks": len(state.EMBEDDED_CHUNKS),
+        "chunks": state.EMBEDDED_CHUNKS_COUNT,
         "files_indexed": len(state.REPOSITORY_DATA),
     }
