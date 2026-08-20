@@ -58,18 +58,23 @@ BINARY_SKIP_EXTENSIONS = set(_env_list("BINARY_SKIP_EXTENSIONS", [
 ]))
 
 # --- Qdrant (tunables only — QDRANT_URL/QDRANT_API_KEY stay in vectordb.py) ---
-QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "repository")
+QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "repository_gemini_embedding_2")
 QDRANT_TIMEOUT_SECONDS = _env_int("QDRANT_TIMEOUT_SECONDS", 60)
-QDRANT_VECTOR_SIZE = _env_int("QDRANT_VECTOR_SIZE", 384)  # must match EMBEDDING_MODEL_NAME's output dimension
+QDRANT_VECTOR_SIZE = _env_int("QDRANT_VECTOR_SIZE", 768)  # must match GEMINI_EMBEDDING_DIMENSION
 QDRANT_UPSERT_BATCH_SIZE = _env_int("QDRANT_UPSERT_BATCH_SIZE", 25)
 QDRANT_UPSERT_MAX_RETRIES = _env_int("QDRANT_UPSERT_MAX_RETRIES", 3)
 DEFAULT_BRANCH_ID = os.environ.get("DEFAULT_BRANCH_ID", "default")
 
 # --- Embeddings ---
-# Empty/unset means "let fastembed pick its own default" (currently BAAI/bge-small-en-v1.5).
-EMBEDDING_MODEL_NAME = os.environ.get("EMBEDDING_MODEL_NAME") or None
-SPARSE_EMBEDDING_MODEL_NAME = os.environ.get("SPARSE_EMBEDDING_MODEL_NAME", "Qdrant/bm25")
-EMBEDDING_BATCH_SIZE = _env_int("EMBEDDING_BATCH_SIZE", 32)
+# Remote embeddings keep ONNX Runtime and model weights off a 512 MB host.
+GEMINI_EMBEDDING_MODEL = os.environ.get("GEMINI_EMBEDDING_MODEL", "gemini-embedding-2")
+GEMINI_EMBEDDING_DIMENSION = _env_int("GEMINI_EMBEDDING_DIMENSION", 768)
+GEMINI_EMBEDDING_TIMEOUT_SECONDS = _env_int("GEMINI_EMBEDDING_TIMEOUT_SECONDS", 60)
+GEMINI_EMBEDDING_MAX_RETRIES = _env_int("GEMINI_EMBEDDING_MAX_RETRIES", 3)
+EMBEDDING_BATCH_SIZE = _env_int("EMBEDDING_BATCH_SIZE", 16)
+
+if QDRANT_VECTOR_SIZE != GEMINI_EMBEDDING_DIMENSION:
+    raise ValueError("QDRANT_VECTOR_SIZE must equal GEMINI_EMBEDDING_DIMENSION")
 
 # --- Build pipeline ---
 # How many parsed files accumulate in memory before being flushed to Postgres.

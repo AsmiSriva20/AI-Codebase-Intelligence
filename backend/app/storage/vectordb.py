@@ -4,9 +4,8 @@ import uuid
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
-    Distance, VectorParams, SparseVectorParams, SparseVector, Modifier,
+    Distance, VectorParams,
     PointStruct, Filter, FieldCondition, MatchValue, PayloadSchemaType,
-    Prefetch, FusionQuery, Fusion,
 )
 
 from app.config import (
@@ -19,15 +18,14 @@ from app.config import (
     SEARCH_DEFAULT_N_RESULTS,
     SEARCH_DENSE_ONLY_N_RESULTS,
 )
-from app.storage.embeddings import create_embedding, create_sparse_embedding
+from app.storage.embeddings import create_embedding
 
 # Explicit, generous timeout: the library default is tuned for a single query,
-# not a bulk upsert of every chunk's dense+sparse vectors in one request, which
+# not a bulk upsert of every chunk's dense vectors in one request, which
 # is a much bigger payload and was timing out on the default over a normal
 # home connection.
 client = QdrantClient(url=os.environ["QDRANT_URL"], api_key=os.environ["QDRANT_API_KEY"], timeout=QDRANT_TIMEOUT_SECONDS)
 DENSE_VECTOR_NAME = "dense"
-SPARSE_VECTOR_NAME = "sparse"
 
 
 def _ensure_collection():
@@ -35,9 +33,6 @@ def _ensure_collection():
         client.create_collection(
             collection_name=COLLECTION,
             vectors_config={DENSE_VECTOR_NAME: VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE)},
-            # IDF modifier gives the BM25-style sparse vectors proper inverse-document-
-            # frequency weighting server-side, rather than raw term-frequency scores.
-            sparse_vectors_config={SPARSE_VECTOR_NAME: SparseVectorParams(modifier=Modifier.IDF)},
         )
 
     # Qdrant requires an index on any payload field used in a query/delete filter.
@@ -81,8 +76,7 @@ def store_embeddings(batches, branch_id=DEFAULT_BRANCH_ID):
     iterable of embedded-chunk lists (e.g. embed_chunks_in_batches) — each
     batch is converted and upserted as it arrives and then dropped, so peak
     memory is bounded by one batch instead of the whole repo's embeddings.
-    Each point carries both a dense vector (semantic similarity) and a sparse
-    BM25-style vector (keyword match) so hybrid_search can fuse the two.
+    Each point carries the dense semantic vector returned by Gemini.
 
     Returns (total_chunks_stored, embedding_dimension) so callers can report
     stats without needing to keep the embedded chunks around themselves.
@@ -104,7 +98,6 @@ def store_embeddings(batches, branch_id=DEFAULT_BRANCH_ID):
                 id=str(uuid.uuid5(uuid.NAMESPACE_OID, f"{branch_id}:{total + i}")),
                 vector={
                     DENSE_VECTOR_NAME: chunk["embedding"],
-                    SPARSE_VECTOR_NAME: SparseVector(**chunk["sparse_embedding"]),
                 },
                 payload={"branch_id": branch_id, "text": chunk["text"], **chunk["metadata"]},
             )
@@ -197,15 +190,10 @@ def hybrid_search(query, n_results=SEARCH_DEFAULT_N_RESULTS, branch_id=DEFAULT_B
     """
     branch_filter = Filter(must=[FieldCondition(key="branch_id", match=MatchValue(value=branch_id))])
     dense_query = create_embedding(query)
-    sparse_query = SparseVector(**create_sparse_embedding(query))
-
     results = client.query_points(
         collection_name=COLLECTION,
-        prefetch=[
-            Prefetch(query=dense_query, using=DENSE_VECTOR_NAME, filter=branch_filter, limit=n_results * 4),
-            Prefetch(query=sparse_query, using=SPARSE_VECTOR_NAME, filter=branch_filter, limit=n_results * 4),
-        ],
-        query=FusionQuery(fusion=Fusion.RRF),
+        query=dense_query,
+        using=DENSE_VECTOR_NAME,
         query_filter=branch_filter,
         limit=n_results,
     )

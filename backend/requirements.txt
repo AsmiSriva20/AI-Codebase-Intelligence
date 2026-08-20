@@ -19,9 +19,6 @@ tree-sitter-ruby==0.23.1
 tree-sitter-php==0.24.1
 tree-sitter-c-sharp==0.23.5
 
-# Embeddings
-fastembed==0.5.1
-
 # LLM
 groq==0.13.1
 
