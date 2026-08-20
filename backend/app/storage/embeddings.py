@@ -4,57 +4,81 @@ import time
 import requests
 
 from app.config import (
-    GEMINI_EMBEDDING_DIMENSION,
-    GEMINI_EMBEDDING_MAX_RETRIES,
-    GEMINI_EMBEDDING_MODEL,
-    GEMINI_EMBEDDING_TIMEOUT_SECONDS,
+    OPENAI_EMBEDDING_DIMENSION,
+    OPENAI_EMBEDDING_MAX_RETRIES,
+    OPENAI_EMBEDDING_MODEL,
+    OPENAI_EMBEDDING_RETRY_BASE_SECONDS,
+    OPENAI_EMBEDDING_TIMEOUT_SECONDS,
 )
 
 
+def _api_key():
+    # Accept the user's existing spelling, but prefer OpenAI's standard name.
+    key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OpenAI_API_KEY")
+    if not key:
+        raise RuntimeError("OPENAI_API_KEY is not configured")
+    return key
+
+
 def _document_text(text, title=None):
-    return f"title: {title or 'none'} | text: {text}"
+    return f"File: {title}\n{text}" if title else text
 
 
-def _query_text(text):
-    return f"task: code retrieval | query: {text}"
+def _retry_delay(response, attempt):
+    if response is not None:
+        retry_after_ms = response.headers.get("retry-after-ms")
+        if retry_after_ms:
+            try:
+                return max(1, int(float(retry_after_ms) / 1000))
+            except ValueError:
+                pass
+        retry_after = response.headers.get("Retry-After")
+        if retry_after:
+            try:
+                return max(1, int(float(retry_after)))
+            except ValueError:
+                pass
+    return min(OPENAI_EMBEDDING_RETRY_BASE_SECONDS * (2 ** (attempt - 1)), 60)
 
 
 def _embed_texts(texts):
-    """Call Gemini's synchronous batch endpoint; store no model files locally."""
-    model_path = f"models/{GEMINI_EMBEDDING_MODEL}"
-    url = f"https://generativelanguage.googleapis.com/v1beta/{model_path}:batchEmbedContents"
+    """Create one OpenAI embedding per input without storing model files locally."""
     payload = {
-        "requests": [
-            {
-                "model": model_path,
-                "content": {"parts": [{"text": text}]},
-                "outputDimensionality": GEMINI_EMBEDDING_DIMENSION,
-            }
-            for text in texts
-        ]
+        "model": OPENAI_EMBEDDING_MODEL,
+        "input": texts,
+        "dimensions": OPENAI_EMBEDDING_DIMENSION,
+        "encoding_format": "float",
     }
 
-    for attempt in range(1, GEMINI_EMBEDDING_MAX_RETRIES + 1):
+    for attempt in range(1, OPENAI_EMBEDDING_MAX_RETRIES + 1):
         try:
             response = requests.post(
-                url,
-                headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"]},
+                "https://api.openai.com/v1/embeddings",
+                headers={
+                    "Authorization": f"Bearer {_api_key()}",
+                    "Content-Type": "application/json",
+                },
                 json=payload,
-                timeout=GEMINI_EMBEDDING_TIMEOUT_SECONDS,
+                timeout=OPENAI_EMBEDDING_TIMEOUT_SECONDS,
             )
             response.raise_for_status()
-            embeddings = [item["values"] for item in response.json()["embeddings"]]
+            data = sorted(response.json()["data"], key=lambda item: item["index"])
+            embeddings = [item["embedding"] for item in data]
             if len(embeddings) != len(texts):
-                raise RuntimeError("Gemini returned a different number of embeddings than requested")
+                raise RuntimeError("OpenAI returned a different number of embeddings than requested")
+            if any(len(vector) != OPENAI_EMBEDDING_DIMENSION for vector in embeddings):
+                raise RuntimeError("OpenAI returned an unexpected embedding dimension")
             return embeddings
-        except (requests.RequestException, KeyError, RuntimeError):
-            if attempt == GEMINI_EMBEDDING_MAX_RETRIES:
+        except (requests.RequestException, KeyError, RuntimeError) as error:
+            if attempt == OPENAI_EMBEDDING_MAX_RETRIES:
                 raise
-            time.sleep(2 * attempt)
+            delay = _retry_delay(getattr(error, "response", None), attempt)
+            print(f"OpenAI embedding request failed; retrying in {delay}s (attempt {attempt})")
+            time.sleep(delay)
 
 
 def create_embedding(text):
-    return _embed_texts([_query_text(text)])[0]
+    return _embed_texts([text])[0]
 
 
 def embed_batch(batch):

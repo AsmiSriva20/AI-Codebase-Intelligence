@@ -76,7 +76,7 @@ def store_embeddings(batches, branch_id=DEFAULT_BRANCH_ID):
     iterable of embedded-chunk lists (e.g. embed_chunks_in_batches) — each
     batch is converted and upserted as it arrives and then dropped, so peak
     memory is bounded by one batch instead of the whole repo's embeddings.
-    Each point carries the dense semantic vector returned by Gemini.
+    Each point carries the dense semantic vector returned by OpenAI.
 
     Returns (total_chunks_stored, embedding_dimension) so callers can report
     stats without needing to keep the embedded chunks around themselves.
