@@ -20,6 +20,12 @@ app.add_middleware(
 )
 
 
+@app.api_route("/health", methods=["GET", "HEAD"], tags=["health"])
+def health_check():
+    """Lightweight liveness check for Render and external uptime monitors."""
+    return {"status": "ok"}
+
+
 @app.on_event("startup")
 def _on_startup():
     init_db()
