@@ -1,11 +1,10 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import ArchitectureDiagram from './components/ArchitectureDiagram';
 import CodeHealthView from './components/CodeHealthView';
 import ChatDrawer from './components/ChatDrawer';
 import AppHeader from './components/AppHeader';
 import ProjectSummaryModal from './components/ProjectSummaryModal';
 import HomePage from './components/HomePage';
-import Spinner from './components/Spinner';
 import { THEMES, DEFAULT_THEME } from './constants/themes';
 import { FONT } from './constants/ui';
 import { apiFetch, API_BASE_URL } from './api/client';
@@ -16,8 +15,8 @@ function App() {
   const [chatOpen, setChatOpen] = useState(false);
   const [focusFile, setFocusFile] = useState(null);
 
-  // 'boot' (checking /status) -> 'home' (no repo loaded yet) -> 'dashboard'.
-  const [screen, setScreen] = useState('boot');
+  // A saved backend repository does not mean this visitor chose to open it.
+  const [screen, setScreen] = useState('home');
 
   const [issuesReport, setIssuesReport] = useState(null);
   const [depReport, setDepReport] = useState(null);
@@ -50,31 +49,6 @@ function App() {
       console.error('Failed to load issues/dependency report:', err);
     }
   }, []);
-
-  // Once on mount: ask the backend whether a repo is already loaded (e.g. this
-  // is a page refresh, or the backend rehydrated its last build from Postgres
-  // on restart) so returning users land straight on the dashboard instead of
-  // seeing the import screen again.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await apiFetch('/status');
-        const data = await res.json();
-        if (cancelled) return;
-        if (data.repo_loaded) {
-          setScreen('dashboard');
-          refreshIssues();
-        } else {
-          setScreen('home');
-        }
-      } catch (err) {
-        console.error('Failed to check backend status:', err);
-        if (!cancelled) setScreen('home');
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [refreshIssues]);
 
   const goToFileInGraph = useCallback((path) => {
     setFocusFile(path);
@@ -113,21 +87,6 @@ function App() {
     + (depReport?.vulnerable_count || 0)
     + (architectureHealth?.summary?.layer_violations || 0)
     + (architectureHealth?.summary?.circular_dependencies || 0);
-
-  if (screen === 'boot') {
-    return (
-      <div style={{
-        width: '100vw',
-        height: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: activeTheme.bg,
-      }}>
-        <Spinner size={22} color={activeTheme.textFaint} />
-      </div>
-    );
-  }
 
   if (screen === 'home') {
     return (

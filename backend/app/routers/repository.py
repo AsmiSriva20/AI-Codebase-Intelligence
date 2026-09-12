@@ -21,9 +21,7 @@ def home():
 
 @router.get("/status")
 def status():
-    """Lightweight check the frontend can call once on load to decide whether
-    to show the home/import screen or jump straight to the dashboard — e.g.
-    after a page refresh, or a process restart that rehydrated from Postgres."""
+    """Report the backend's shared active repository, not a visitor session."""
     return {
         "repo_loaded": state.CURRENT_REPOSITORY_ID is not None and state.INDEX is not None,
         "repository_id": state.CURRENT_REPOSITORY_ID,
