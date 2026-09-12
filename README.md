@@ -17,6 +17,13 @@ Without a persistent disk, checkouts are lost on restart or redeploy; import the
 repository again when source files are needed. If you attach a persistent disk,
 set `REPOS_DIR` to a directory under that disk's mount path.
 
+The `.python-version` files pin native Render builds to Python 3.11, matching
+the Dockerfile and the pinned dependencies. Both the repository root and backend
+directory contain the pin to cover either service root configuration. Render
+selects the latest 3.11 patch release. If Render's Environment page already has
+`PYTHON_VERSION` set to 3.14, remove that override so the file takes effect.
+The environment variable takes precedence over `.python-version`.
+
 For a native Python backend, use root directory `backend`, build command
 `pip install -r requirements.txt`, and start command
 `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
@@ -67,7 +74,7 @@ docker compose config --quiet
 
 ## Run locally without Docker
 
-Backend (Python 3.11 or later):
+Backend (Python 3.11):
 
 ```sh
 cd backend
