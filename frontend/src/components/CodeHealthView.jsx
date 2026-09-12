@@ -254,7 +254,7 @@ function DeadCodeRow({ theme, item, onNavigateToFile }) {
   );
 }
 
-export default function CodeHealthView({ activeTheme: theme, issuesReport, depReport, onNavigateToFile, onRefresh, resetKey }) {
+export default function CodeHealthView({ activeTheme: theme, issuesReport, depReport, architectureHealth, healthScore, onNavigateToFile, onRefresh }) {
   const [tab, setTab] = useState('code');
   const [severityFilter, setSeverityFilter] = useState(null);
   const [categoryFilter, setCategoryFilter] = useState('all');
@@ -293,13 +293,7 @@ export default function CodeHealthView({ activeTheme: theme, issuesReport, depRe
   const hasRepo = totalFiles > 0;
 
   useEffect(() => {
-    setHotspots(null);
-    setDeadCode(null);
-  }, [resetKey]);
-
-  useEffect(() => {
     if (tab !== 'hotspots' || hotspots !== null || !hasRepo) return;
-    setHotspotsLoading(true);
     apiFetch('/hotspots')
       .then((res) => res.json())
       .then((data) => setHotspots(data.hotspots || []))
@@ -312,7 +306,6 @@ export default function CodeHealthView({ activeTheme: theme, issuesReport, depRe
 
   useEffect(() => {
     if (tab !== 'deadcode' || deadCode !== null || !hasRepo) return;
-    setDeadCodeLoading(true);
     apiFetch('/dead-code')
       .then((res) => res.json())
       .then((data) => setDeadCode(data))
@@ -324,6 +317,12 @@ export default function CodeHealthView({ activeTheme: theme, issuesReport, depRe
   }, [tab, deadCode, hasRepo]);
 
   const maxChurn = hotspots?.length ? Math.max(...hotspots.map((h) => h.churn)) : 0;
+
+  const handleTabChange = (nextTab) => {
+    if (nextTab === 'hotspots' && hotspots === null && hasRepo) setHotspotsLoading(true);
+    if (nextTab === 'deadcode' && deadCode === null && hasRepo) setDeadCodeLoading(true);
+    setTab(nextTab);
+  };
 
   return (
     <div style={{
@@ -365,6 +364,29 @@ export default function CodeHealthView({ activeTheme: theme, issuesReport, depRe
           </div>
         ) : (
           <>
+            {healthScore && (
+              <div style={{
+                display: 'flex', gap: '18px', alignItems: 'center', flexWrap: 'wrap',
+                padding: '16px 18px', marginBottom: '18px', borderRadius: '12px',
+                background: theme.surface, border: `1px solid ${theme.border}`,
+              }}>
+                <div>
+                  <span style={labelStyle(theme)}>Repository Health</span>
+                  <div style={{ fontSize: '28px', fontWeight: 800, color: healthScore.overall >= 80 ? theme.success : healthScore.overall >= 60 ? theme.warning : theme.danger }}>
+                    {healthScore.overall}/100 <span style={{ fontSize: '14px' }}>Grade {healthScore.grade}</span>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '7px', flexWrap: 'wrap', flex: 1 }}>
+                  {Object.entries(healthScore.categories || {}).map(([name, category]) => (
+                    <div key={name} title={(category.deductions || []).map((item) => `${item.reason}: -${item.points}`).join('\n') || 'No deductions'} style={{ padding: '7px 9px', borderRadius: '7px', background: theme.surfaceAlt, minWidth: '105px' }}>
+                      <div style={{ fontSize: '10px', color: theme.textFaint, textTransform: 'capitalize' }}>{name.replace('_', ' ')}</div>
+                      <div style={{ fontSize: '14px', fontWeight: 700, color: theme.text }}>{category.score}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Stat cards */}
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '20px' }}>
               <StatCard theme={theme} severity="total" count={totalFindings} active={severityFilter === null} onClick={() => setSeverityFilter(null)} />
@@ -385,12 +407,13 @@ export default function CodeHealthView({ activeTheme: theme, issuesReport, depRe
               {[
                 { key: 'code', label: `Code Findings (${totalFindings})` },
                 { key: 'deps', label: `Dependencies (${depReport?.vulnerable_count ?? 0} vulnerable)` },
+                { key: 'architecture', label: `Architecture (${architectureHealth?.summary?.layer_violations || 0} violations)` },
                 { key: 'hotspots', label: 'Hotspots' },
                 { key: 'deadcode', label: 'Dead Code' },
               ].map((t) => (
                 <button
                   key={t.key}
-                  onClick={() => setTab(t.key)}
+                  onClick={() => handleTabChange(t.key)}
                   style={{
                     padding: '9px 16px', border: 'none', background: 'transparent',
                     color: tab === t.key ? theme.accent : theme.textMuted,
@@ -482,6 +505,57 @@ export default function CodeHealthView({ activeTheme: theme, issuesReport, depRe
                       {otherDeps.map((d, i) => <DependencyCard key={i} theme={theme} dep={d} />)}
                     </div>
                   </>
+                )}
+              </>
+            )}
+
+            {tab === 'architecture' && (
+              <>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px' }}>
+                  {[
+                    ['Layer violations', architectureHealth?.summary?.layer_violations || 0],
+                    ['Dependency cycles', architectureHealth?.summary?.circular_dependencies || 0],
+                    ['Highly coupled', architectureHealth?.summary?.high_coupling_modules || 0],
+                  ].map(([label, value]) => (
+                    <div key={label} style={{ padding: '10px 12px', minWidth: '145px', border: `1px solid ${theme.border}`, borderRadius: '8px', background: theme.surface }}>
+                      <div style={{ fontSize: '10.5px', color: theme.textFaint }}>{label}</div>
+                      <div style={{ fontSize: '18px', fontWeight: 800, color: value ? theme.warning : theme.success }}>{value}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {architectureHealth?.layer_violations?.map((violation, index) => (
+                  <div key={`${violation.from}:${violation.to}:${index}`} style={{ padding: '10px 12px', marginBottom: '7px', border: `1px solid ${theme.border}`, borderRadius: '8px', background: theme.surface }}>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: theme.warning }}>{violation.type}</div>
+                    <code style={{ display: 'block', marginTop: '4px', fontSize: '10.5px', color: theme.textMuted, wordBreak: 'break-all' }}>{violation.from} â†’ {violation.to}</code>
+                    <div style={{ marginTop: '4px', fontSize: '11px', color: theme.textFaint }}>{violation.message}</div>
+                  </div>
+                ))}
+
+                {architectureHealth?.circular_dependencies?.map((cycle, index) => (
+                  <div key={`cycle:${index}`} style={{ padding: '10px 12px', marginBottom: '7px', border: `1px solid ${theme.danger}55`, borderRadius: '8px', background: theme.dangerSoft }}>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: theme.danger }}>Circular dependency ({cycle.size} modules)</div>
+                    <code style={{ display: 'block', marginTop: '4px', fontSize: '10.5px', color: theme.textMuted, wordBreak: 'break-all' }}>{cycle.nodes.join(' â†’ ')}</code>
+                  </div>
+                ))}
+
+                {architectureHealth?.high_coupling_modules?.map((module) => (
+                  <button
+                    key={module.path}
+                    onClick={() => onNavigateToFile(module.path)}
+                    style={{
+                      display: 'flex', width: '100%', justifyContent: 'space-between', gap: '10px',
+                      padding: '10px 12px', marginBottom: '7px', border: `1px solid ${theme.border}`,
+                      borderRadius: '8px', background: theme.surface, cursor: 'pointer', textAlign: 'left',
+                    }}
+                  >
+                    <code style={{ fontSize: '10.5px', color: theme.textMuted, wordBreak: 'break-all' }}>{module.path}</code>
+                    <span style={{ fontSize: '10.5px', color: theme.textFaint, flexShrink: 0 }}>in {module.fan_in} / out {module.fan_out}</span>
+                  </button>
+                ))}
+
+                {!architectureHealth?.summary?.layer_violations && !architectureHealth?.summary?.circular_dependencies && (
+                  <p style={{ fontSize: '12.5px', color: theme.success, padding: '16px 4px' }}>No layer violations or circular dependencies detected.</p>
                 )}
               </>
             )}

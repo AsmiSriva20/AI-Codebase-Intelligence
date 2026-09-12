@@ -2,7 +2,7 @@ import ast
 import os
 import re
 
-from app.parsers import JS_EXTENSIONS, TREESITTER_LANGUAGES
+from app.parsers import JS_EXTENSIONS, TREESITTER_LANGUAGES, language_for_path
 from app.analysis.python_module_resolver import build_module_map, resolve_relative_import
 
 JS_RESOLVE_EXTENSIONS = [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".json"]
@@ -201,7 +201,7 @@ def _collect_language_nodes(files, folder, extensions):
         path = file["path"].replace("\\", "/")
         if not _in_folder_scope(path, folder):
             continue
-        if file["extension"] not in extensions:
+        if file["extension"] not in extensions and language_for_path(path) not in {"dockerfile", "docker-compose"}:
             continue
         nodes.append(path)
     return nodes

@@ -4,6 +4,7 @@ pydantic==2.10.4
 python-dotenv==1.0.1
 GitPython==3.1.44
 requests==2.32.3
+PyYAML==6.0.2
 
 # Parsing (core must support every grammar's ABI version below)
 tree-sitter==0.26.0
@@ -18,9 +19,6 @@ tree-sitter-c==0.24.2
 tree-sitter-ruby==0.23.1
 tree-sitter-php==0.24.1
 tree-sitter-c-sharp==0.23.5
-
-# LLM
-groq==0.13.1
 
 # Metadata DB (Postgres)
 SQLAlchemy==2.0.36

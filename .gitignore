@@ -2,6 +2,8 @@
 __pycache__/
 *.pyc
 venv/
+.venv/
+.pytest_cache/
 .env
 
 # Node
@@ -21,5 +23,3 @@ backend/repos/
 # Obsolete — replaced by Qdrant, see docs/full-platform-spec.md §2
 backend/chroma_db/
 docs/
-.env
-

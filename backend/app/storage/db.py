@@ -27,3 +27,6 @@ def init_db():
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE reports ADD COLUMN IF NOT EXISTS architecture_report JSONB"))
         conn.execute(text("ALTER TABLE reports ADD COLUMN IF NOT EXISTS call_graph_report JSONB"))
+        conn.execute(text("ALTER TABLE reports ADD COLUMN IF NOT EXISTS architecture_health_report JSONB"))
+        conn.execute(text("ALTER TABLE reports ADD COLUMN IF NOT EXISTS health_score_report JSONB"))
+        conn.execute(text("ALTER TABLE files ADD COLUMN IF NOT EXISTS content_hash VARCHAR"))

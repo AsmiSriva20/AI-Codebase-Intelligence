@@ -199,7 +199,12 @@ def _get_functions(lang_name, compiled, root):
             name_nodes = captures.get("name")
             name = name_nodes[0].text.decode() if name_nodes else ""
 
-        functions.append({"name": name, "code": def_node.text.decode(errors="ignore")})
+        functions.append({
+            "name": name,
+            "code": def_node.text.decode(errors="ignore"),
+            "start_line": def_node.start_point.row + 1,
+            "end_line": def_node.end_point.row + 1,
+        })
 
     return functions
 
@@ -207,15 +212,22 @@ def _get_functions(lang_name, compiled, root):
 def _get_classes(compiled, root):
     query = compiled.get("class")
     if query is None:
-        return []
+        return [], {}
 
     classes = []
+    locations = {}
     for captures in _match_pairs(query, root):
         name_nodes = captures.get("name")
         if name_nodes:
-            classes.append(name_nodes[0].text.decode())
+            name = name_nodes[0].text.decode()
+            classes.append(name)
+            definition = captures.get("definition.class", name_nodes)[0]
+            locations[name] = {
+                "start_line": definition.start_point.row + 1,
+                "end_line": definition.end_point.row + 1,
+            }
 
-    return classes
+    return classes, locations
 
 
 def _get_imports(compiled, root):
@@ -271,10 +283,12 @@ class _LanguageParser:
             source = f.read()
         tree = parser.parse(source)
         root = tree.root_node
+        classes, class_locations = _get_classes(compiled, root)
 
         return {
             "functions": _get_functions(self.lang_name, compiled, root),
-            "classes": _get_classes(compiled, root),
+            "classes": classes,
+            "class_locations": class_locations,
             "imports": _get_imports(compiled, root),
             "graph": _build_call_graph(self.lang_name, root) if self.lang_name in _HAS_CALL_GRAPH else {},
         }

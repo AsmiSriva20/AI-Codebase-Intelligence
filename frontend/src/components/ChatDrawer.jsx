@@ -3,7 +3,7 @@ import { buttonStyle, inputStyle, FONT } from '../constants/ui';
 import { apiFetch } from '../api/client';
 import Spinner from './Spinner';
 
-export default function ChatDrawer({ onClose, activeTheme }) {
+export default function ChatDrawer({ onClose, activeTheme, onNavigateToFile }) {
   const [chatQuery, setChatQuery] = useState('');
   const [chatMessages, setChatMessages] = useState([
     { role: 'assistant', content: 'Hi! Ask me anything about this codebase.' },
@@ -33,7 +33,12 @@ export default function ChatDrawer({ onClose, activeTheme }) {
       }
 
       const aiReply = data.answer || data.response || data.result || JSON.stringify(data);
-      setChatMessages((prev) => [...prev, { role: 'assistant', content: aiReply }]);
+      setChatMessages((prev) => [...prev, {
+        role: 'assistant',
+        content: aiReply,
+        evidence: data.evidence || [],
+        confidence: data.confidence,
+      }]);
     } catch (err) {
       console.error('Error asking LLM:', err);
       setChatMessages((prev) => [...prev, {
@@ -84,7 +89,39 @@ export default function ChatDrawer({ onClose, activeTheme }) {
               whiteSpace: 'pre-wrap',
             }}
           >
-            {msg.content}
+            <div>{msg.content}</div>
+            {msg.confidence && (
+              <div style={{ marginTop: '8px', fontSize: '10.5px', color: activeTheme.textMuted }}>
+                Retrieval confidence: <strong style={{ color: activeTheme.text }}>{msg.confidence.label} ({msg.confidence.score}/100)</strong>
+              </div>
+            )}
+            {msg.evidence?.length > 0 && (
+              <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <span style={{ fontSize: '10px', fontWeight: 700, color: activeTheme.textFaint, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Evidence</span>
+                {msg.evidence.slice(0, 5).map((source, sourceIndex) => (
+                  <button
+                    key={`${source.citation}:${sourceIndex}`}
+                    onClick={() => onNavigateToFile?.(source.path)}
+                    title={`Open ${source.path}`}
+                    style={{
+                      border: `1px solid ${activeTheme.border}`,
+                      background: activeTheme.surface,
+                      color: activeTheme.accent,
+                      borderRadius: '5px',
+                      padding: '4px 6px',
+                      textAlign: 'left',
+                      fontSize: '10.5px',
+                      cursor: 'pointer',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {source.citation}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         ))}
         {chatLoading && (

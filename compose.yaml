@@ -1,0 +1,62 @@
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  backend:
+    build: ./backend
+    command: [uvicorn, "app.main:app", --host, "0.0.0.0", --port, "10000", --root-path, /api]
+    environment:
+      DATABASE_URL: postgresql://aci:aci@postgres:5432/aci
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ""
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LLM_MODEL_NAME: ${LLM_MODEL_NAME:-gpt-4o-mini}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      REPOS_DIR: /data/repos
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+    volumes:
+      - repositories:/data/repos
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:10000/health/postgres'); urllib.request.urlopen('http://localhost:10000/health/qdrant')"
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: aci
+      POSTGRES_USER: aci
+      POSTGRES_PASSWORD: aci
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U aci -d aci"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.6
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+volumes:
+  repositories:
+  postgres_data:
+  qdrant_data:

@@ -1,4 +1,6 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from app.config import CHANGE_IMPACT_MAX_DEPTH
 
 
 class CloneRequest(BaseModel):
@@ -38,3 +40,9 @@ class ArchitectureRequest(BaseModel):
 
 class SwitchBranchRequest(BaseModel):
     name: str
+
+
+class ChangeImpactRequest(BaseModel):
+    target: str
+    branch: str | None = None
+    max_depth: int = Field(default=CHANGE_IMPACT_MAX_DEPTH, ge=1, le=8)

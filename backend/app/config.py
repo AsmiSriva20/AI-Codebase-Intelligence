@@ -6,11 +6,11 @@ threshold, the binary-extension skip list) were duplicated with slight drift
 across two or three files. Collecting them here gives one source of truth and
 one place to tune per-environment via env vars, without touching code.
 
-Required secrets (QDRANT_URL, QDRANT_API_KEY, GROQ_API_KEY, DATABASE_URL) are
+Required secrets (QDRANT_URL, QDRANT_API_KEY, OPENAI_API_KEY, DATABASE_URL) are
 intentionally NOT centralized here — they're read directly via os.environ[...]
-in the module that needs them (storage/vectordb.py, llm/client.py,
-storage/db.py) so that importing this module never fails just because an
-unrelated service's credentials aren't configured yet.
+in the module that needs them (storage/vectordb.py, storage/embeddings.py,
+llm/client.py, storage/db.py) so that importing this module never fails just
+because an unrelated service's credentials aren't configured yet.
 """
 import os
 import tempfile
@@ -38,7 +38,7 @@ def _env_list(name, default):
 # non-root user) run the app from a read-only or otherwise non-writable
 # project directory and only guarantee a writable temp dir. Override REPOS_DIR
 # if you mount a persistent volume instead.
-REPOS_DIR = os.environ.get("REPOS_DIR", os.path.join(tempfile.gettempdir(), "aci-repos"))
+REPOS_DIR = os.environ.get("REPOS_DIR") or os.path.join(tempfile.gettempdir(), "aci-repos")
 REPO_PATH = os.path.join(REPOS_DIR, "repository")
 
 # --- File scanning / indexing limits ---
@@ -92,10 +92,21 @@ CHUNK_MAX_CHARS = _env_int("CHUNK_MAX_CHARS", 3000)
 # --- Search defaults ---
 SEARCH_DEFAULT_N_RESULTS = _env_int("SEARCH_DEFAULT_N_RESULTS", 5)
 SEARCH_DENSE_ONLY_N_RESULTS = _env_int("SEARCH_DENSE_ONLY_N_RESULTS", 15)
+HYBRID_DENSE_CANDIDATES = _env_int("HYBRID_DENSE_CANDIDATES", 30)
+HYBRID_LEXICAL_CANDIDATES = _env_int("HYBRID_LEXICAL_CANDIDATES", 30)
+LEXICAL_SCAN_LIMIT = _env_int("LEXICAL_SCAN_LIMIT", 5000)
+GRAPH_EXPANSION_RESULTS = _env_int("GRAPH_EXPANSION_RESULTS", 5)
 
-# --- LLM (Groq) ---
-LLM_MODEL_NAME = os.environ.get("LLM_MODEL_NAME", "llama-3.3-70b-versatile")
+# --- Architecture intelligence ---
+ARCHITECTURE_HIGH_COUPLING_THRESHOLD = _env_int("ARCHITECTURE_HIGH_COUPLING_THRESHOLD", 8)
+CHANGE_IMPACT_MAX_DEPTH = _env_int("CHANGE_IMPACT_MAX_DEPTH", 4)
+
+# --- LLM (OpenAI) ---
+# gpt-4o-mini supports the existing Chat Completions + JSON mode contract while
+# keeping interactive repository Q&A relatively fast and inexpensive.
+LLM_MODEL_NAME = os.environ.get("LLM_MODEL_NAME", "gpt-4o-mini")
 LLM_TEMPERATURE = _env_float("LLM_TEMPERATURE", 0.2)
+LLM_REQUEST_TIMEOUT_SECONDS = _env_int("LLM_REQUEST_TIMEOUT_SECONDS", 60)
 LLM_EXPLAIN_FILE_MAX_CHARS = _env_int("LLM_EXPLAIN_FILE_MAX_CHARS", 8000)
 LLM_SUMMARY_MAX_FILES = _env_int("LLM_SUMMARY_MAX_FILES", 20)
 LLM_SUMMARY_MAX_ITEMS_PER_FILE = _env_int("LLM_SUMMARY_MAX_ITEMS_PER_FILE", 3)

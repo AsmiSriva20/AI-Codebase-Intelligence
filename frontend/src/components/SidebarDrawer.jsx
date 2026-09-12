@@ -8,6 +8,7 @@ import { apiFetch } from '../api/client';
 const BASE_TABS = [
   { key: 'ast', label: 'Structure' },
   { key: 'code', label: 'Source' },
+  { key: 'impact', label: 'Impact' },
   { key: 'ai', label: 'AI Explainer' },
 ];
 
@@ -26,6 +27,9 @@ export default function SidebarDrawer({
   const [fileExplanation, setFileExplanation] = useState(null);
   const [loadingAi, setLoadingAi] = useState(false);
   const [selectedTargetFn, setSelectedTargetFn] = useState(null);
+  const [changeImpact, setChangeImpact] = useState(null);
+  const [impactLoading, setImpactLoading] = useState(false);
+  const [impactError, setImpactError] = useState(null);
 
   const fetchFileExplanation = async () => {
     if (fileExplanation || loadingAi) return;
@@ -50,6 +54,27 @@ export default function SidebarDrawer({
   const handleFunctionClick = (fnName) => {
     setSelectedTargetFn(fnName);
     setActiveTab('code');
+  };
+
+  const fetchChangeImpact = async () => {
+    if (changeImpact || impactLoading) return;
+    setImpactLoading(true);
+    setImpactError(null);
+    const target = selectedTargetFn ? `${selectedFile}::${selectedTargetFn}` : selectedFile;
+    try {
+      const response = await apiFetch('/change-impact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+      setChangeImpact(data);
+    } catch (err) {
+      setImpactError(err.message);
+    } finally {
+      setImpactLoading(false);
+    }
   };
 
   const chipStyle = {
@@ -94,7 +119,11 @@ export default function SidebarDrawer({
         {tabs.map((tab) => (
           <button
             key={tab.key}
-            onClick={() => { setActiveTab(tab.key); if (tab.key === 'ai') fetchFileExplanation(); }}
+            onClick={() => {
+              setActiveTab(tab.key);
+              if (tab.key === 'ai') fetchFileExplanation();
+              if (tab.key === 'impact') fetchChangeImpact();
+            }}
             style={{
               flex: 1,
               padding: '10px 4px',
@@ -129,6 +158,30 @@ export default function SidebarDrawer({
                 </div>
               )}
 
+              {fileInfo.stages && (
+                <div style={{ marginBottom: '14px' }}>
+                  <span style={labelStyle(activeTheme)}>Build stages ({fileInfo.stages.length})</span>
+                  {fileInfo.stages.map((stage, i) => (
+                    <div key={i} style={{ marginTop: '6px', fontSize: '12px', color: activeTheme.text, overflowWrap: 'anywhere' }}>
+                      <strong>{stage.name || `Stage ${i + 1}`}</strong>: {stage.base_image}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {fileInfo.services && (
+                <div style={{ marginBottom: '14px' }}>
+                  <span style={labelStyle(activeTheme)}>Services ({fileInfo.services.length})</span>
+                  {fileInfo.services.map((service) => (
+                    <div key={service.name} style={{ marginTop: '8px', fontSize: '12px', color: activeTheme.text, overflowWrap: 'anywhere' }}>
+                      <strong>{service.name}</strong>
+                      {service.image && <div>Image: {String(service.image)}</div>}
+                      {service.build && <div>Build: {typeof service.build === 'string' ? service.build : JSON.stringify(service.build)}</div>}
+                      {service.depends_on?.length > 0 && <div>Depends on: {service.depends_on.map(String).join(', ')}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {!fileInfo.stages && !fileInfo.services && <>
               <div style={{ marginBottom: '14px' }}>
                 <span style={labelStyle(activeTheme)}>Functions ({fileInfo.functions?.length || 0})</span>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '6px' }}>
@@ -151,8 +204,9 @@ export default function SidebarDrawer({
                 </div>
               </div>
 
+              </>}
               <div>
-                <span style={labelStyle(activeTheme)}>Imports ({fileInfo.imports?.length || 0})</span>
+                <span style={labelStyle(activeTheme)}>{fileInfo.stages || fileInfo.services ? 'Images' : 'Imports'} ({fileInfo.imports?.length || 0})</span>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '6px' }}>
                   {fileInfo.imports?.map((imp, i) => (
                     <span key={i} style={{ ...chipStyle, cursor: 'default', color: activeTheme.textMuted }}>
@@ -169,6 +223,47 @@ export default function SidebarDrawer({
 
         {activeTab === 'code' && (
           <CodeViewer filePath={selectedFile} activeTheme={activeTheme} targetFunction={selectedTargetFn} />
+        )}
+
+        {activeTab === 'impact' && (
+          impactLoading ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: activeTheme.accent }}>
+              <Spinner size={14} color={activeTheme.accent} />
+              Traversing callers and dependenciesâ€¦
+            </div>
+          ) : impactError ? (
+            <div>
+              <p style={{ fontSize: '12px', color: activeTheme.danger, marginBottom: '10px' }}>{impactError}</p>
+              <button onClick={fetchChangeImpact} style={buttonStyle(activeTheme, 'secondary')}>Retry</button>
+            </div>
+          ) : changeImpact ? (
+            <div>
+              <div style={{ padding: '12px', borderRadius: '8px', background: activeTheme.surfaceAlt, border: `1px solid ${activeTheme.border}`, marginBottom: '14px' }}>
+                <span style={labelStyle(activeTheme)}>Change Risk</span>
+                <div style={{ marginTop: '5px', fontSize: '20px', fontWeight: 800, color: changeImpact.risk === 'high' ? activeTheme.danger : changeImpact.risk === 'medium' ? activeTheme.warning : activeTheme.success }}>
+                  {changeImpact.risk.toUpperCase()} {changeImpact.risk_score}/100
+                </div>
+              </div>
+              {[
+                ['Direct callers', changeImpact.direct_callers],
+                ['Dependent modules', changeImpact.dependent_modules?.map((item) => item.path)],
+                ['Affected endpoints', changeImpact.affected_endpoints?.map((item) => item.symbol)],
+                ['Affected tests', changeImpact.affected_tests?.map((item) => item.symbol)],
+              ].map(([label, items]) => items?.length > 0 && (
+                <div key={label} style={{ marginBottom: '14px' }}>
+                  <span style={labelStyle(activeTheme)}>{label} ({items.length})</span>
+                  <div style={{ marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                    {items.slice(0, 12).map((item) => (
+                      <code key={item} style={{ fontSize: '10.5px', color: activeTheme.textMuted, wordBreak: 'break-all' }}>{item}</code>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              <p style={{ fontSize: '10.5px', color: activeTheme.textFaint, lineHeight: 1.5 }}>{changeImpact.limitations}</p>
+            </div>
+          ) : (
+            <button onClick={fetchChangeImpact} style={buttonStyle(activeTheme, 'secondary')}>Analyze change impact</button>
+          )
         )}
 
         {activeTab === 'ai' && (

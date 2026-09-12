@@ -3,6 +3,7 @@ helper functions that mutate it. The app is still single-repo-at-a-time — ever
 router reads/writes these module-level globals rather than each other's state,
 which is why this lives in one place instead of being duplicated per router.
 """
+import hashlib
 import os
 import stat
 import threading
@@ -13,11 +14,11 @@ from git import Repo
 
 from app.config import (
     REPO_PATH, BINARY_SKIP_EXTENSIONS, MAX_INDEXABLE_FILE_SIZE, FILE_PERSIST_BATCH_SIZE,
-    LLM_SUMMARY_MAX_FILES, EMBEDDING_BATCH_SIZE,
+    LLM_SUMMARY_MAX_FILES, EMBEDDING_BATCH_SIZE, OPENAI_EMBEDDING_DIMENSION,
 )
 from app.storage.db import get_session
 from app.storage.models import Repository, Branch, File as FileRow, Report
-from app.storage.vectordb import store_embeddings
+from app.storage.vectordb import collection_size, delete_files, store_embeddings
 from app import parsers
 from app.parsers.base import empty_analysis
 from app.analysis.scanner import scan_repository
@@ -42,6 +43,9 @@ ARCHITECTURE_REPORT = None
 CALL_GRAPH_REPORT = None
 DEAD_CODE_REPORT = None
 HOTSPOTS_REPORT = None
+ARCHITECTURE_HEALTH_REPORT = None
+HEALTH_SCORE_REPORT = None
+LAST_BUILD_STATS = None
 
 # Persisted counterparts of the state above (Postgres row ids for the repo/branch
 # currently checked out on disk). The app is still single-repo-at-a-time until
@@ -67,7 +71,7 @@ def parse_file(full_path):
     if ext in BINARY_SKIP_EXTENSIONS or size > MAX_INDEXABLE_FILE_SIZE:
         return None
 
-    parser_module = LANGUAGE_PARSERS.get(ext)
+    parser_module = parsers.parser_for_path(full_path, LANGUAGE_PARSERS)
     if parser_module is not None:
         try:
             return parser_module.analyze_file(full_path)
@@ -94,6 +98,15 @@ def parse_file(full_path):
 
 def get_file_analysis(full_path):
     """Used by /file-info and /dependencies for a single file's analysis."""
+    return parse_file(full_path)
+
+
+def get_relative_file_analysis(relative_path):
+    """Parse a known repository-relative path without allowing it to escape the checkout."""
+    root = os.path.abspath(REPO_PATH)
+    full_path = os.path.abspath(os.path.join(root, relative_path))
+    if os.path.commonpath([root, full_path]) != root:
+        return None
     return parse_file(full_path)
 
 
@@ -125,7 +138,7 @@ def rehydrate_from_db():
     branch loaded as one `.all()` would spike memory right at startup."""
     global CURRENT_REPOSITORY_ID, CURRENT_BRANCH_ID, FILES_INDEXED_COUNT, INDEX
     global ISSUES_REPORT, DEPENDENCY_REPORT, ARCHITECTURE_REPORT, CALL_GRAPH_REPORT
-    global DEAD_CODE_REPORT, HOTSPOTS_REPORT
+    global DEAD_CODE_REPORT, HOTSPOTS_REPORT, ARCHITECTURE_HEALTH_REPORT, HEALTH_SCORE_REPORT
 
     session = get_session()
     try:
@@ -169,6 +182,8 @@ def rehydrate_from_db():
             CALL_GRAPH_REPORT = report.call_graph_report
             DEAD_CODE_REPORT = report.dead_code_report
             HOTSPOTS_REPORT = report.hotspots_report
+            ARCHITECTURE_HEALTH_REPORT = report.architecture_health_report
+            HEALTH_SCORE_REPORT = report.health_score_report
     finally:
         session.close()
 
@@ -179,13 +194,15 @@ def reset_report_caches():
     so a stale architecture/call-graph/dead-code/hotspots report never survives
     past the commit it was computed for."""
     global ISSUES_REPORT, DEPENDENCY_REPORT, ARCHITECTURE_REPORT, CALL_GRAPH_REPORT
-    global DEAD_CODE_REPORT, HOTSPOTS_REPORT
+    global DEAD_CODE_REPORT, HOTSPOTS_REPORT, ARCHITECTURE_HEALTH_REPORT, HEALTH_SCORE_REPORT
     ISSUES_REPORT = None
     DEPENDENCY_REPORT = None
     ARCHITECTURE_REPORT = None
     CALL_GRAPH_REPORT = None
     DEAD_CODE_REPORT = None
     HOTSPOTS_REPORT = None
+    ARCHITECTURE_HEALTH_REPORT = None
+    HEALTH_SCORE_REPORT = None
 
 
 def clear_readonly_and_retry(func, path, exc):
@@ -195,7 +212,7 @@ def clear_readonly_and_retry(func, path, exc):
     func(path)
 
 
-def analyze_repository(repo_path, branch_id):
+def _analyze_repository_full(repo_path, branch_id):
     """Scan, parse, index, chunk, embed and persist the repo one file at a
     time, instead of building a full-repo in-memory list (every function's
     source text, every text file's raw content) before any of that starts.
@@ -241,6 +258,8 @@ def analyze_repository(repo_path, branch_id):
                     branch_id=branch_id,
                     path=path,
                     extension=os.path.splitext(path)[1],
+                    size=file["size"],
+                    content_hash=_content_hash(file["full_path"]),
                     analysis=_strip_nul_bytes(analysis),
                 ))
                 counters["files_indexed"] += 1
@@ -270,6 +289,202 @@ def analyze_repository(repo_path, branch_id):
 
     print("Chunks:", EMBEDDED_CHUNKS_COUNT, "Files:", FILES_INDEXED_COUNT)
 
+    return index
+
+
+def _content_hash(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _git_changes(repo_path, old_sha, new_sha):
+    """Return (changed/current paths, deleted/old paths) between two commits."""
+    with Repo(repo_path) as repo:
+        raw = repo.git.diff("--name-status", "-M", old_sha, new_sha)
+    changed = set()
+    deleted = set()
+    for line in raw.splitlines():
+        fields = line.split("\t")
+        if len(fields) < 2:
+            continue
+        status = fields[0]
+        if status.startswith("R") and len(fields) >= 3:
+            deleted.add(fields[1].replace("\\", "/"))
+            changed.add(fields[2].replace("\\", "/"))
+        elif status.startswith("D"):
+            deleted.add(fields[1].replace("\\", "/"))
+        else:
+            changed.add(fields[-1].replace("\\", "/"))
+    return changed, deleted
+
+
+def _index_from_database(session, branch_id):
+    index = empty_index()
+    rows = session.query(FileRow).filter(FileRow.branch_id == branch_id).yield_per(FILE_PERSIST_BATCH_SIZE)
+    for row in rows:
+        index_file(index, row.path, row.analysis)
+    return index
+
+
+def analyze_repository(repo_path, branch_id):
+    """Incrementally index Git changes, falling back to a streaming full build."""
+    global LAST_BUILD_STATS, FILES_INDEXED_COUNT, EMBEDDED_CHUNKS_COUNT, EMBEDDING_DIMENSION
+    with Repo(repo_path) as repo:
+        current_sha = repo.head.commit.hexsha
+    session = get_session()
+    try:
+        branch = session.get(Branch, branch_id)
+        previous_sha = branch.last_commit_sha if branch else None
+        existing_count = session.query(FileRow).filter(FileRow.branch_id == branch_id).count()
+        unhashed_count = session.query(FileRow).filter(
+            FileRow.branch_id == branch_id,
+            FileRow.content_hash.is_(None),
+        ).count()
+    finally:
+        session.close()
+
+    if not previous_sha or not existing_count or unhashed_count:
+        index = _analyze_repository_full(repo_path, branch_id)
+        LAST_BUILD_STATS = {
+            "mode": "full",
+            "from_commit": previous_sha,
+            "to_commit": current_sha,
+            "files_changed": FILES_INDEXED_COUNT,
+            "files_deleted": 0,
+            "files_unchanged": 0,
+        }
+        return index
+
+    try:
+        changed_paths, deleted_paths = _git_changes(repo_path, previous_sha, current_sha)
+    except Exception:
+        index = _analyze_repository_full(repo_path, branch_id)
+        LAST_BUILD_STATS = {
+            "mode": "full-fallback",
+            "from_commit": previous_sha,
+            "to_commit": current_sha,
+            "files_changed": FILES_INDEXED_COUNT,
+            "files_deleted": 0,
+            "files_unchanged": 0,
+        }
+        return index
+
+    session = get_session()
+    try:
+        if not changed_paths and not deleted_paths:
+            index = _index_from_database(session, branch_id)
+            total_files = existing_count
+            FILES_INDEXED_COUNT = total_files
+            EMBEDDED_CHUNKS_COUNT = collection_size(branch_id)
+            EMBEDDING_DIMENSION = OPENAI_EMBEDDING_DIMENSION if EMBEDDED_CHUNKS_COUNT else 0
+            LAST_BUILD_STATS = {
+                "mode": "incremental",
+                "from_commit": previous_sha,
+                "to_commit": current_sha,
+                "files_changed": 0,
+                "files_deleted": 0,
+                "files_unchanged": total_files,
+            }
+            return index
+
+        scanned = {file["path"]: file for file in scan_repository(repo_path)}
+        existing_hashes = {
+            row.path: row.content_hash
+            for row in session.query(FileRow).filter(
+                FileRow.branch_id == branch_id,
+                FileRow.path.in_(changed_paths),
+            )
+        }
+        actual_changed = set()
+        for path in changed_paths:
+            file = scanned.get(path)
+            if file is None:
+                deleted_paths.add(path)
+                continue
+            try:
+                digest = _content_hash(file["full_path"])
+            except OSError:
+                deleted_paths.add(path)
+                continue
+            if digest != existing_hashes.get(path):
+                file["content_hash"] = digest
+                actual_changed.add(path)
+
+        replaced_paths = actual_changed | deleted_paths
+        if replaced_paths:
+            session.query(FileRow).filter(
+                FileRow.branch_id == branch_id,
+                FileRow.path.in_(replaced_paths),
+            ).delete(synchronize_session=False)
+            delete_files(branch_id, replaced_paths)
+
+        changed_files = [scanned[path] for path in sorted(actual_changed)]
+
+        def stream_embedding_batches():
+            chunk_buffer = []
+            row_buffer = []
+
+            def flush_rows():
+                if row_buffer:
+                    session.bulk_save_objects(row_buffer)
+                    session.flush()
+                    row_buffer.clear()
+
+            for file in changed_files:
+                analysis = parse_file(file["full_path"])
+                if analysis is None:
+                    continue
+                path = file["path"]
+                chunk_buffer.extend(chunk_file(path, analysis))
+                row_buffer.append(FileRow(
+                    branch_id=branch_id,
+                    path=path,
+                    extension=file["extension"],
+                    size=file["size"],
+                    content_hash=file["content_hash"],
+                    analysis=_strip_nul_bytes(analysis),
+                ))
+                while len(chunk_buffer) >= EMBEDDING_BATCH_SIZE:
+                    batch = chunk_buffer[:EMBEDDING_BATCH_SIZE]
+                    del chunk_buffer[:EMBEDDING_BATCH_SIZE]
+                    yield embed_batch(batch)
+                if len(row_buffer) >= FILE_PERSIST_BATCH_SIZE:
+                    flush_rows()
+
+            if chunk_buffer:
+                yield embed_batch(chunk_buffer)
+            flush_rows()
+
+        new_chunks, new_dimension = store_embeddings(
+            stream_embedding_batches(),
+            branch_id=branch_id,
+            clear_existing=False,
+        )
+        session.commit()
+        index = _index_from_database(session, branch_id)
+        total_files = session.query(FileRow).filter(FileRow.branch_id == branch_id).count()
+    finally:
+        session.close()
+
+    FILES_INDEXED_COUNT = total_files
+    EMBEDDED_CHUNKS_COUNT = collection_size(branch_id)
+    if new_chunks:
+        EMBEDDING_DIMENSION = new_dimension
+    elif EMBEDDED_CHUNKS_COUNT:
+        EMBEDDING_DIMENSION = OPENAI_EMBEDDING_DIMENSION
+    LAST_BUILD_STATS = {
+        "mode": "incremental",
+        "from_commit": previous_sha,
+        "to_commit": current_sha,
+        "files_changed": len(actual_changed),
+        "files_deleted": len(deleted_paths),
+        "files_unchanged": max(0, total_files - len(actual_changed)),
+        "chunks_reembedded": new_chunks,
+    }
+    print("Incremental build:", LAST_BUILD_STATS)
     return index
 
 

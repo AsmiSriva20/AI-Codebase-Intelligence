@@ -1,11 +1,16 @@
 from fastapi import APIRouter, HTTPException
 
 from app import state
+from app.config import HOTSPOTS_DEFAULT_SINCE_DAYS
 from app.schemas import ExplainRequest
 from app.analysis.scanner import scan_repository
 from app.analysis.issues import scan_repository as scan_issues
 from app.analysis.dependency_scan import generate_dependency_report
 from app.analysis.dead_code import find_dead_code
+from app.analysis.architecture import generate_architecture
+from app.analysis.architecture_health import analyze_architecture_health
+from app.analysis.git_history import get_hotspots
+from app.analysis.health_score import calculate_health_score
 from app.llm.summary import summarize_repository
 from app.llm.explainer import explain_file
 
@@ -57,6 +62,46 @@ def dead_code(branch: str | None = None):
         state.upsert_report(dead_code_report=state.DEAD_CODE_REPORT)
 
     return state.DEAD_CODE_REPORT
+
+
+@router.get("/health-score")
+def health_score(branch: str | None = None):
+    if branch:
+        state.switch_to_branch(branch)
+    if state.CURRENT_BRANCH_ID is None:
+        raise HTTPException(status_code=400, detail="No repository cloned yet. Call /clone first.")
+
+    if state.HEALTH_SCORE_REPORT is None:
+        files = scan_repository(state.REPO_PATH)
+        issues_report = get_issues()
+        dependency_report = get_dependency_report()
+        dead_code_report = dead_code()
+
+        if state.ARCHITECTURE_REPORT is None:
+            state.ARCHITECTURE_REPORT = generate_architecture(files)
+            state.upsert_report(architecture_report=state.ARCHITECTURE_REPORT)
+        if state.ARCHITECTURE_HEALTH_REPORT is None:
+            state.ARCHITECTURE_HEALTH_REPORT = analyze_architecture_health(
+                state.ARCHITECTURE_REPORT
+            )
+            state.upsert_report(architecture_health_report=state.ARCHITECTURE_HEALTH_REPORT)
+        if state.HOTSPOTS_REPORT is None:
+            state.HOTSPOTS_REPORT = {
+                "hotspots": get_hotspots(state.REPO_PATH, files),
+                "since_days": HOTSPOTS_DEFAULT_SINCE_DAYS,
+            }
+            state.upsert_report(hotspots_report=state.HOTSPOTS_REPORT)
+
+        state.HEALTH_SCORE_REPORT = calculate_health_score(
+            issues_report,
+            dependency_report,
+            state.ARCHITECTURE_HEALTH_REPORT,
+            dead_code_report,
+            state.HOTSPOTS_REPORT,
+        )
+        state.upsert_report(health_score_report=state.HEALTH_SCORE_REPORT)
+
+    return state.HEALTH_SCORE_REPORT
 
 
 @router.get("/summary")

@@ -1,12 +1,11 @@
 import os
 
 from app import state
-from app.parsers import LANGUAGE_BY_EXT
+from app.parsers import language_for_path
 
 
 def get_dependencies(path):
-    ext = os.path.splitext(path)[1].lower()
-    if ext not in LANGUAGE_BY_EXT:
+    if language_for_path(path) is None:
         return []
 
     full_path = os.path.join(state.REPO_PATH, path)

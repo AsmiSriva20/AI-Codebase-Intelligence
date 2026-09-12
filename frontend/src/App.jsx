@@ -21,6 +21,8 @@ function App() {
 
   const [issuesReport, setIssuesReport] = useState(null);
   const [depReport, setDepReport] = useState(null);
+  const [architectureHealth, setArchitectureHealth] = useState(null);
+  const [healthScore, setHealthScore] = useState(null);
 
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [summaryText, setSummaryText] = useState(null);
@@ -34,12 +36,16 @@ function App() {
   const refreshIssues = useCallback(async () => {
     setHealthResetKey((k) => k + 1);
     try {
-      const [issuesRes, depRes] = await Promise.all([
-        apiFetch('/issues'),
-        apiFetch('/dependency-report'),
-      ]);
+      // These endpoints persist report fragments into the same branch row, so
+      // request them in order rather than racing the first report creation.
+      const issuesRes = await apiFetch('/issues');
+      const depRes = await apiFetch('/dependency-report');
+      const architectureHealthRes = await apiFetch('/architecture-health');
+      const healthScoreRes = await apiFetch('/health-score');
       setIssuesReport(await issuesRes.json());
       setDepReport(await depRes.json());
+      setArchitectureHealth(await architectureHealthRes.json());
+      setHealthScore(await healthScoreRes.json());
     } catch (err) {
       console.error('Failed to load issues/dependency report:', err);
     }
@@ -104,7 +110,9 @@ function App() {
 
   const attentionCount = (issuesReport?.summary?.critical || 0)
     + (issuesReport?.summary?.high || 0)
-    + (depReport?.vulnerable_count || 0);
+    + (depReport?.vulnerable_count || 0)
+    + (architectureHealth?.summary?.layer_violations || 0)
+    + (architectureHealth?.summary?.circular_dependencies || 0);
 
   if (screen === 'boot') {
     return (
@@ -168,18 +176,24 @@ function App() {
         </div>
         <div style={{ display: view === 'health' ? 'block' : 'none', width: '100%', height: '100%', overflow: 'hidden' }}>
           <CodeHealthView
+            key={healthResetKey}
             activeTheme={activeTheme}
             issuesReport={issuesReport}
             depReport={depReport}
+            architectureHealth={architectureHealth}
+            healthScore={healthScore}
             onNavigateToFile={goToFileInGraph}
             onRefresh={refreshIssues}
-            resetKey={healthResetKey}
           />
         </div>
       </div>
 
       {chatOpen && (
-        <ChatDrawer onClose={() => setChatOpen(false)} activeTheme={activeTheme} />
+        <ChatDrawer
+          onClose={() => setChatOpen(false)}
+          activeTheme={activeTheme}
+          onNavigateToFile={(path) => { goToFileInGraph(path); setChatOpen(false); }}
+        />
       )}
 
       {summaryOpen && (

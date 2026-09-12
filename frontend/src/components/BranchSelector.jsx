@@ -23,8 +23,8 @@ export default function BranchSelector({ activeTheme, onBranchSwitched, refreshK
   };
 
   useEffect(() => {
-    loadBranches();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const timer = setTimeout(() => loadBranches(), 0);
+    return () => clearTimeout(timer);
   }, [refreshKey]);
 
   const handleSelect = async (name) => {

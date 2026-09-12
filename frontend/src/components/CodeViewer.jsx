@@ -15,9 +15,15 @@ const LANGUAGE_BY_EXTENSION = {
   md: 'markdown',
   css: 'css',
   html: 'markup',
+  yaml: 'yaml',
+  yml: 'yaml',
 };
 
 function detectLanguage(filePath) {
+  const name = filePath?.replaceAll('\\', '/').split('/').pop()?.toLowerCase() || '';
+  if (/^(dockerfile|containerfile)(\.|$)/.test(name) || /\.(dockerfile|containerfile)$/.test(name)) {
+    return 'docker';
+  }
   const ext = filePath?.split('.').pop()?.toLowerCase();
   return LANGUAGE_BY_EXTENSION[ext] || 'text';
 }

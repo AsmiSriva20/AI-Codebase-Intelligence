@@ -9,5 +9,7 @@ export function apiFetch(path, options) {
 }
 
 export function wsUrl(path) {
-  return `${API_BASE_URL.replace(/^http/, 'ws')}${path}`;
+  const url = new URL(apiUrl(path), window.location.origin);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  return url.toString();
 }

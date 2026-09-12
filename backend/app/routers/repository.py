@@ -43,6 +43,7 @@ async def clone_repository(payload: CloneRequest):
     state.EMBEDDING_DIMENSION = 0
     state.INDEX = None
     state.reset_report_caches()
+    state.LAST_BUILD_STATS = None
     state.CURRENT_REPOSITORY_ID = None
     state.CURRENT_BRANCH_ID = None
 
@@ -153,6 +154,7 @@ def build_repository():
         "message": "Repository indexed successfully",
         "chunks": state.EMBEDDED_CHUNKS_COUNT,
         "files_indexed": state.FILES_INDEXED_COUNT,
+        "build": state.LAST_BUILD_STATS,
     }
 
 
@@ -191,4 +193,5 @@ def switch_branch(request: SwitchBranchRequest):
         "branch": request.name,
         "chunks": state.EMBEDDED_CHUNKS_COUNT,
         "files_indexed": state.FILES_INDEXED_COUNT,
+        "build": state.LAST_BUILD_STATS,
     }

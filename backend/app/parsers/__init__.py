@@ -1,4 +1,6 @@
-from app.parsers import treesitter_parser
+import os
+
+from app.parsers import docker_parser, treesitter_parser
 
 # Used elsewhere (e.g. architecture.py's import-graph scoping) as "every
 # JS/TS-family extension", regardless of which specific tree-sitter grammar
@@ -39,3 +41,18 @@ LANGUAGE_BY_EXT = {".py": "python", **JS_TS_LANGUAGES, **TREESITTER_LANGUAGES}
 def build_registry():
     """extension -> parser instance, each exposing analyze_file(path)."""
     return {ext: treesitter_parser.for_language(lang) for ext, lang in LANGUAGE_BY_EXT.items()}
+
+
+def language_for_path(path):
+    return docker_parser.language_for_path(path) or LANGUAGE_BY_EXT.get(os.path.splitext(path)[1].lower())
+
+
+def parser_for_path(path, registry=None):
+    language = docker_parser.language_for_path(path)
+    if language == "dockerfile":
+        return docker_parser
+    if language == "docker-compose":
+        return docker_parser.ComposeParser
+    if registry is None:
+        registry = build_registry()
+    return registry.get(os.path.splitext(path)[1].lower())

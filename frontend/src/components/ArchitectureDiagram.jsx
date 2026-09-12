@@ -172,7 +172,8 @@ function DiagramContent({ activeTheme, issuesReport, focusFile, onConsumeFocusFi
   }, [currentScope]);
 
   useEffect(() => {
-    loadArchitecture();
+    const timer = setTimeout(() => loadArchitecture(), 0);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -292,8 +293,11 @@ function DiagramContent({ activeTheme, issuesReport, focusFile, onConsumeFocusFi
     if (!focusFile) return;
     const target = nodes.find((n) => n.id === focusFile);
     if (!target) return;
-    focusOnFile(focusFile);
-    onConsumeFocusFile?.();
+    const timer = setTimeout(() => {
+      focusOnFile(focusFile);
+      onConsumeFocusFile?.();
+    }, 0);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusFile, nodes]);
 

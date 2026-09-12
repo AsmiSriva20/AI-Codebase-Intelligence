@@ -23,6 +23,8 @@ def _chunk_raw_text(text, path):
                 "type": "text",
                 "name": path,
                 "path": path,
+                "start_line": start + 1,
+                "end_line": min(start + WINDOW_LINES, len(lines)),
             },
         })
 
@@ -43,11 +45,15 @@ def chunk_file(path, analysis):
                 "type": "function",
                 "name": function["name"],
                 "path": path,
+                "start_line": function.get("start_line"),
+                "end_line": function.get("end_line"),
             },
         })
 
     # Class chunks
     for cls in analysis["classes"]:
+
+        location = analysis.get("class_locations", {}).get(cls, {})
 
         chunks.append({
             "text": f"Class: {cls}",
@@ -55,6 +61,17 @@ def chunk_file(path, analysis):
                 "type": "class",
                 "name": cls,
                 "path": path,
+                "start_line": location.get("start_line"),
+                "end_line": location.get("end_line"),
+            },
+        })
+
+    for block in analysis.get("blocks", []):
+        chunks.append({
+            "text": block["code"][:MAX_CHUNK_CHARS],
+            "metadata": {
+                "type": block["type"], "name": block["name"], "path": path,
+                "start_line": block["start_line"], "end_line": block["end_line"],
             },
         })
 

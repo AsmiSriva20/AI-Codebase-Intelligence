@@ -50,6 +50,7 @@ class File(Base):
     path = Column(String, nullable=False)
     extension = Column(String)
     size = Column(Integer)
+    content_hash = Column(String)
     analysis = Column(JSONB)  # functions/classes/imports (any language) or raw_text fallback
 
     branch = relationship("Branch", back_populates="files")
@@ -65,6 +66,8 @@ class Report(Base):
     hotspots_report = Column(JSONB)
     architecture_report = Column(JSONB)  # generate_architecture() output, cached to skip re-parsing every request
     call_graph_report = Column(JSONB)    # build_call_graph() output, cached the same way
+    architecture_health_report = Column(JSONB)
+    health_score_report = Column(JSONB)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     branch = relationship("Branch", back_populates="report")

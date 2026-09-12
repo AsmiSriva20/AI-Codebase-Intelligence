@@ -1,12 +1,12 @@
 import os
 
 from app import state
-from app.parsers import LANGUAGE_BY_EXT
+from app.parsers import language_for_path
 
 
 def get_file_info(full_path, relative_path):
     ext = os.path.splitext(full_path)[1].lower()
-    lang_name = LANGUAGE_BY_EXT.get(ext)
+    lang_name = language_for_path(full_path)
 
     if lang_name is None:
         return {
@@ -30,4 +30,5 @@ def get_file_info(full_path, relative_path):
         "classes": sorted(set(analysis.get("classes", []))),
         "imports": sorted(set(analysis.get("imports", []))),
         "docstring": None,
+        **{key: analysis[key] for key in ("stages", "instructions", "services") if key in analysis},
     }

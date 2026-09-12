@@ -3,8 +3,8 @@ import json
 
 class GraphEventRegistry:
     """Tracks connected /events/graph WebSocket clients and broadcasts to all of
-    them. One registry, in-memory, per process — fine for this single-instance
-    dev tool; would need a pub/sub backend (Redis etc.) behind multiple workers."""
+    them. One registry is kept in memory per process, so real-time delivery is
+    intentionally scoped to this project's single-process deployment."""
 
     def __init__(self):
         self._connections = set()
